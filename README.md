@@ -1,6 +1,6 @@
-# Industrial Inspection System v3.1.0
+# Industrial Inspection System v4.0
 
-![Version](https://img.shields.io/badge/version-3.1.0-blue)
+![Version](https://img.shields.io/badge/version-4.0-blue)
 ![Theme](https://img.shields.io/badge/theme-Cisco%20Catalyst%20Industrial-006994)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![JavaScript](https://img.shields.io/badge/JavaScript-ES6%2B-yellow)

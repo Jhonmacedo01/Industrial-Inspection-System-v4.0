@@ -1,6 +1,6 @@
 /**
  * INSPECTION FORM v3.1.0
- * Módulo de Exportação ZIP com Fotos por Formulário
+ * Módulo de Exportação ZIP Simplificado - Apenas Fotos + TXT
  * @module zip-export
  */
 
@@ -8,20 +8,74 @@ class ZipExportManager {
     constructor() {
         this.photoManagers = {};
         this.identification = { local: '', om: '', tag: '' };
+        this._isDestroyed = false;
+        this._debug = true;
+        this._initialized = false;
+        this._processedPhotoKeys = new Set(); // Para evitar duplicação
+        
+        this._log('🔧 ZipExportManager instanciado - Modo Simplificado');
+        this._initialized = true;
     }
 
-    registerPhotoManager(key, manager) {
-        if (manager && typeof manager.getPhotosData === 'function') {
-            this.photoManagers[key] = manager;
-            console.log(`[ZipExport] Manager de fotos registrado: ${key}`);
+    _log(message, data = null) {
+        if (this._debug) {
+            if (data) {
+                console.log(`[ZipExport] ${message}`, data);
+            } else {
+                console.log(`[ZipExport] ${message}`);
+            }
         }
     }
 
-    setIdentification(identification) {
-        this.identification = { ...identification };
+    _error(message, error = null) {
+        console.error(`[ZipExport] ❌ ${message}`, error || '');
     }
 
+    _warn(message, data = null) {
+        console.warn(`[ZipExport] ⚠️ ${message}`, data || '');
+    }
+
+    isInitialized() {
+        return this._initialized && !this._isDestroyed;
+    }
+
+    /**
+     * Registra um manager de fotos
+     */
+    registerPhotoManager(key, manager) {
+        if (this._isDestroyed) {
+            this._error('❌ Manager destruído');
+            return;
+        }
+        if (manager && typeof manager.getPhotosData === 'function') {
+            this.photoManagers[key] = manager;
+            this._log(`✅ Manager de fotos registrado: ${key}`);
+        } else {
+            this._warn(`⚠️ Manager inválido para chave: ${key}`);
+        }
+    }
+
+    /**
+     * Atualiza identificação
+     */
+    setIdentification(identification) {
+        if (this._isDestroyed) return;
+        this.identification = { ...identification };
+        this._log('📋 Identificação atualizada:', this.identification);
+    }
+
+    /**
+     * Coleta todos os dados para exportação - SEM DUPLICAÇÃO
+     */
     collectAllData() {
+        if (this._isDestroyed) {
+            this._error('❌ Manager destruído');
+            return null;
+        }
+        
+        this._log('📊 Coletando dados para exportação...');
+        this._processedPhotoKeys = new Set(); // Resetar para cada exportação
+        
         const managers = {
             gnss: window.gnssForm,
             cftv: window.cftvForm,
@@ -33,382 +87,438 @@ class ZipExportManager {
         const result = {
             metadata: {
                 exportedAt: new Date().toISOString(),
-                version: CONFIG.VERSION,
-                system: CONFIG.SYSTEM_NAME
+                version: CONFIG?.VERSION || '3.1.0',
+                system: CONFIG?.SYSTEM_NAME || 'Inspection Form'
             },
             identification: { ...this.identification },
             forms: {},
             fotos: {}
         };
 
+        // Coletar dados dos formulários - PRIORIDADE 1
         Object.entries(managers).forEach(([type, manager]) => {
             if (manager && typeof manager.getData === 'function') {
-                const data = manager.getData();
-                result.forms[type] = data;
-                if (data.fotos) {
-                    result.fotos[type] = data.fotos;
+                try {
+                    const data = manager.getData();
+                    result.forms[type] = data;
+                    
+                    // Extrair fotos do formulário - APENAS se não houver photos registrados
+                    if (data && data.fotos && data.fotos.length > 0) {
+                        const key = `${type}_evidencias`;
+                        // Verificar se já existe via photoManagers
+                        if (!this.photoManagers[key] || this.photoManagers[key].getCount() === 0) {
+                            result.fotos[type] = data.fotos;
+                            this._processedPhotoKeys.add(type);
+                            this._log(`📷 ${data.fotos.length} fotos encontradas em ${type} (via formulário)`);
+                        } else {
+                            this._log(`⚠️ ${type} já tem fotos registradas via manager, ignorando duplicação`);
+                        }
+                    }
+                } catch (error) {
+                    this._error(`❌ Erro ao coletar dados de ${type}`, error);
+                    result.forms[type] = { items: [] };
                 }
+            } else {
+                result.forms[type] = { items: [] };
+                this._log(`⚠️ Manager ${type} não disponível`);
             }
         });
 
+        // Coletar fotos registradas diretamente - PRIORIDADE 2 (não sobrescreve)
         Object.entries(this.photoManagers).forEach(([key, manager]) => {
             if (manager && typeof manager.getPhotosData === 'function') {
-                const photos = manager.getPhotosData();
-                if (photos && photos.length > 0) {
-                    result.fotos[key] = photos;
+                try {
+                    const photos = manager.getPhotosData();
+                    if (photos && photos.length > 0) {
+                        // Extrair o tipo do form do key (ex: gnss_evidencias -> gnss)
+                        const formType = key.replace('_evidencias', '');
+                        
+                        // Verificar se já não foi adicionado via formulário
+                        if (!this._processedPhotoKeys.has(formType)) {
+                            // Usar a chave original para diferenciar se necessário
+                            const targetKey = key.includes('_evidencias') ? formType : key;
+                            result.fotos[targetKey] = photos;
+                            this._processedPhotoKeys.add(formType);
+                            this._log(`📷 ${photos.length} fotos registradas em ${key} (via manager)`);
+                        } else {
+                            this._log(`⚠️ ${formType} já processado, ignorando duplicação do manager ${key}`);
+                        }
+                    }
+                } catch (error) {
+                    this._error(`❌ Erro ao coletar fotos de ${key}`, error);
                 }
             }
         });
 
+        this._log(`✅ Dados coletados: ${Object.keys(result.forms).length} formulários, ${Object.keys(result.fotos).length} grupos de fotos`);
         return result;
     }
 
-    generateHTMLReport(data) {
-        const now = new Date(data.metadata.exportedAt);
-        const sections = {
-            gnss: { name: 'GNSS - Sistema de Navegação Global por Satélite', icon: '🛰️' },
-            cftv: { name: 'CFTV - Circuito Fechado de Televisão', icon: '📷' },
-            radio: { name: 'RÁDIO - Comunicação Digital', icon: '📡' },
-            plc: { name: 'PLC - Controlador Lógico Programável', icon: '⚙️' },
-            switch: { name: 'SWITCH - Switch Industrial', icon: '🔌' }
-        };
-
-        let html = `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Relatório de Inspeção - ${data.identification.local || 'Industrial'}</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #f4f6f8;
-            color: #1a1a2e;
-            padding: 40px 20px;
-            line-height: 1.6;
+    /**
+     * Gera o relatório TXT completo
+     */
+    generateTXTReport(data) {
+        if (!data) {
+            this._error('❌ Dados inválidos para gerar relatório');
+            return this._getErrorTXT();
         }
-        .container { max-width: 1000px; margin: 0 auto; }
-        .header {
-            background: linear-gradient(135deg, #002b3b, #006994);
-            color: white;
-            padding: 40px;
-            border-radius: 12px;
-            margin-bottom: 30px;
-        }
-        .header h1 { font-size: 28px; font-weight: 700; }
-        .header .subtitle { opacity: 0.8; margin-top: 8px; }
-        .header .meta { margin-top: 16px; display: flex; gap: 24px; flex-wrap: wrap; font-size: 14px; }
-        .header .meta span { background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 20px; }
-        .identification {
-            background: white;
-            padding: 20px 24px;
-            border-radius: 8px;
-            margin-bottom: 24px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.06);
-            display: flex;
-            flex-wrap: wrap;
-            gap: 24px;
-        }
-        .identification .field { display: flex; align-items: center; gap: 8px; }
-        .identification .field .label { font-weight: 600; color: #5a6a7a; }
-        .identification .field .value { font-weight: 500; }
-        .section {
-            background: white;
-            border-radius: 8px;
-            margin-bottom: 24px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.06);
-            overflow: hidden;
-        }
-        .section-header {
-            background: #f8f9fa;
-            padding: 16px 24px;
-            border-bottom: 2px solid #e5e7eb;
-            font-weight: 600;
-            font-size: 18px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        .section-body { padding: 20px 24px; }
-        .item {
-            padding: 12px 0;
-            border-bottom: 1px solid #f1f5f9;
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-        }
-        .item:last-child { border-bottom: none; }
-        .item .status {
-            flex-shrink: 0;
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
-            font-weight: 700;
-        }
-        .item .status.ok { background: #ecfdf5; color: #10b981; }
-        .item .status.nok { background: #fef2f2; color: #ef4444; }
-        .item .status.pending { background: #f1f5f9; color: #94a3b8; }
-        .item .content { flex: 1; }
-        .item .content .title { font-weight: 500; }
-        .item .content .annotation {
-            font-size: 14px;
-            color: #5a6a7a;
-            margin-top: 4px;
-            padding: 6px 12px;
-            background: #f8f9fa;
-            border-radius: 4px;
-        }
-        .item .content .annotation .label { font-weight: 500; color: #1a1a2e; }
-        .fotos-section {
-            margin-top: 16px;
-            padding-top: 16px;
-            border-top: 2px solid #e5e7eb;
-        }
-        .fotos-section h4 {
-            font-size: 14px;
-            color: #5a6a7a;
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .fotos-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-            gap: 8px;
-        }
-        .fotos-grid .foto {
-            border-radius: 6px;
-            overflow: hidden;
-            border: 1px solid #e5e7eb;
-            aspect-ratio: 1;
-            background: #f8f9fa;
-        }
-        .fotos-grid .foto img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        .footer {
-            text-align: center;
-            padding: 24px;
-            color: #94a3b8;
-            font-size: 14px;
-            border-top: 1px solid #e5e7eb;
-            margin-top: 24px;
-        }
-        .summary {
-            background: white;
-            border-radius: 8px;
-            padding: 20px 24px;
-            margin-bottom: 24px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.06);
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 16px;
-        }
-        .summary .stat { text-align: center; }
-        .summary .stat .number { font-size: 28px; font-weight: 700; color: #006994; }
-        .summary .stat .label { font-size: 14px; color: #5a6a7a; }
-        @media (max-width: 600px) {
-            body { padding: 16px; }
-            .header { padding: 24px; }
-            .header h1 { font-size: 22px; }
-            .identification { flex-direction: column; gap: 8px; }
-            .section-body { padding: 16px; }
-            .fotos-grid { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); }
-        }
-        @media print {
-            body { background: white; padding: 20px; }
-            .section { box-shadow: none; border: 1px solid #ddd; }
-            .header { background: #002b3b !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>📋 Relatório de Inspeção Industrial</h1>
-            <div class="subtitle">${CONFIG.SYSTEM_NAME} v${CONFIG.VERSION}</div>
-            <div class="meta">
-                <span>📅 ${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR')}</span>
-                <span>📁 ${data.identification.local || 'Local não informado'}</span>
-            </div>
-        </div>
+        
+        this._log('📄 Gerando relatório TXT...');
+        
+        try {
+            const now = new Date(data.metadata?.exportedAt || Date.now());
+            const identification = data.identification || { local: '', om: '', tag: '' };
+            const forms = data.forms || {};
 
-        <div class="identification">
-            <div class="field"><span class="label">📍 LOCAL:</span><span class="value">${data.identification.local || '—'}</span></div>
-            <div class="field"><span class="label">📄 OM:</span><span class="value">${data.identification.om || '—'}</span></div>
-            <div class="field"><span class="label">🏷️ TAG:</span><span class="value">${data.identification.tag || '—'}</span></div>
-        </div>`;
+            const lines = [];
+            const separator = '='.repeat(70);
+            const subSeparator = '-'.repeat(50);
 
-        let totalOK = 0, totalNOK = 0;
-        Object.entries(sections).forEach(([key, section]) => {
-            const form = data.forms[key];
-            if (form?.items) {
-                totalOK += form.items.filter(i => i.status === 'OK').length;
-                totalNOK += form.items.filter(i => i.status === 'NOK').length;
-            }
-        });
+            // Cabeçalho
+            lines.push(separator);
+            lines.push(`        INSPECTION FORM - RELATÓRIO DE INSPEÇÃO INDUSTRIAL`);
+            lines.push(separator);
+            lines.push(`📅 Data: ${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR')}`);
+            lines.push(`📁 Sistema: ${CONFIG?.SYSTEM_NAME || 'Industrial Inspection System'} v${CONFIG?.VERSION || '3.1.0'}`);
+            lines.push('');
 
-        html += `
-        <div class="summary">
-            <div class="stat"><div class="number">${totalOK + totalNOK}</div><div class="label">Total Itens</div></div>
-            <div class="stat"><div class="number" style="color:#10b981">${totalOK}</div><div class="label">✅ Conformes</div></div>
-            <div class="stat"><div class="number" style="color:#ef4444">${totalNOK}</div><div class="label">❌ Não Conformes</div></div>
-        </div>`;
+            // Identificação
+            lines.push(subSeparator);
+            lines.push('📋 DADOS DE IDENTIFICAÇÃO DA INSPEÇÃO');
+            lines.push(subSeparator);
+            lines.push(`📍 LOCAL: ${identification.local || 'Não informado'}`);
+            lines.push(`📄 OM: ${identification.om || 'Não informado'}`);
+            lines.push(`🏷️ TAG: ${identification.tag || 'Não informado'}`);
+            lines.push('');
 
-        Object.entries(sections).forEach(([key, section]) => {
-            const form = data.forms[key];
-            const fotos = data.fotos[key] || [];
+            // Seções
+            const sections = {
+                gnss: { name: 'GNSS - Sistema de Navegação Global por Satélite', icon: '🛰️' },
+                cftv: { name: 'CFTV - Circuito Fechado de Televisão', icon: '📷' },
+                radio: { name: 'RÁDIO - Comunicação Digital', icon: '📡' },
+                plc: { name: 'PLC - Controlador Lógico Programável', icon: '⚙️' },
+                switch: { name: 'SWITCH - Switch Industrial', icon: '🔌' }
+            };
 
-            html += `
-        <div class="section">
-            <div class="section-header">${section.icon} ${section.name}</div>
-            <div class="section-body">`;
+            let totalOK = 0;
+            let totalNOK = 0;
 
-            if (form?.items?.length) {
-                form.items.forEach(item => {
-                    const statusClass = item.status === 'OK' ? 'ok' : item.status === 'NOK' ? 'nok' : 'pending';
-                    const statusLabel = item.status || '—';
-                    html += `
-                <div class="item">
-                    <div class="status ${statusClass}">${statusLabel === 'OK' ? '✓' : statusLabel === 'NOK' ? '✗' : '?'}</div>
-                    <div class="content">
-                        <div class="title">ITEM ${String(item.number).padStart(2, '0')}: ${item.title}</div>
-                        ${item.annotations ? `<div class="annotation"><span class="label">📝 Obs:</span> ${item.annotations}</div>` : ''}
-                    </div>
-                </div>`;
-                });
-            } else {
-                html += `<p style="color:#94a3b8; padding: 8px 0;">Nenhum dado registrado</p>`;
-            }
+            Object.entries(sections).forEach(([key, section]) => {
+                const form = forms[key] || { items: [] };
+                const items = form.items || [];
 
-            if (fotos.length) {
-                html += `
-                <div class="fotos-section">
-                    <h4><i class="fas fa-camera"></i> Evidências Fotográficas (${fotos.length})</h4>
-                    <div class="fotos-grid">`;
-                fotos.forEach((foto, idx) => {
-                    html += `
-                        <div class="foto">
-                            <img src="${foto.dataUrl}" alt="Evidência ${idx + 1}" loading="lazy">
-                        </div>`;
-                });
-                html += `
-                    </div>
-                </div>`;
-            }
+                lines.push('');
+                lines.push(`▸ ${section.icon} ${section.name}`);
+                lines.push(subSeparator);
 
-            html += `
-            </div>
-        </div>`;
-        });
-
-        html += `
-        <div class="footer">
-            Relatório gerado automaticamente por ${CONFIG.SYSTEM_NAME} v${CONFIG.VERSION} · ${new Date().toLocaleString('pt-BR')}
-        </div>
-    </div>
-</body>
-</html>`;
-
-        return html;
-    }
-
-    async exportZip(onProgress) {
-        const data = this.collectAllData();
-        const local = data.identification.local || 'inspecao';
-        const filename = `inspecao_${local}_${formatDateForFilename()}.zip`;
-
-        if (typeof JSZip !== 'undefined') {
-            return this._exportWithJSZip(data, filename, onProgress);
-        } else {
-            return this._exportFallback(data, filename, onProgress);
-        }
-    }
-
-    async _exportWithJSZip(data, filename, onProgress) {
-        const zip = new JSZip();
-
-        const html = this.generateHTMLReport(data);
-        zip.file('relatorio_inspecao.html', html);
-
-        const jsonData = JSON.stringify(data, null, 2);
-        zip.file('dados.json', jsonData);
-
-        let photoCount = 0;
-        const allPhotos = Object.values(data.fotos).flat();
-        const totalPhotos = allPhotos.length;
-
-        Object.entries(data.fotos).forEach(([formType, fotos]) => {
-            const folder = `fotos/${formType}`;
-            fotos.forEach((foto, idx) => {
-                const safeName = foto.name.replace(/[^a-zA-Z0-9.]/g, '_') || `evidencia_${idx + 1}.jpg`;
-                zip.file(`${folder}/${idx + 1}_${safeName}`,
-                    foto.dataUrl.split(',')[1],
-                    { base64: true }
-                );
-                photoCount++;
-                if (onProgress) {
-                    onProgress((photoCount / totalPhotos) * 100);
+                if (items.length > 0) {
+                    items.forEach(item => {
+                        if (item.status) {
+                            const statusIcon = item.status === 'OK' ? '✅' : '❌';
+                            if (item.status === 'OK') totalOK++;
+                            if (item.status === 'NOK') totalNOK++;
+                            
+                            lines.push(`  ${statusIcon} ITEM ${String(item.number).padStart(2, '0')}: ${item.title}`);
+                            lines.push(`     Status: ${item.status}`);
+                            if (item.annotations && item.annotations.trim()) {
+                                lines.push(`     📝 Obs: ${item.annotations}`);
+                            }
+                            lines.push('');
+                        }
+                    });
+                } else {
+                    lines.push(`  📭 Nenhum dado registrado`);
                 }
             });
-        });
 
-        const blob = await zip.generateAsync({
-            type: 'blob',
-            compression: 'DEFLATE',
-            compressionOptions: { level: 6 }
-        });
+            // Resumo Final
+            lines.push('');
+            lines.push(separator);
+            lines.push('📊 RESUMO FINAL DA INSPEÇÃO');
+            lines.push(separator);
+            lines.push(`✅ Total de itens CONFORMES: ${totalOK}`);
+            lines.push(`❌ Total de itens NÃO CONFORMES: ${totalNOK}`);
+            lines.push('');
 
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
+            if (totalNOK === 0) {
+                lines.push('🎉 NENHUMA NÃO CONFORMIDADE REGISTRADA');
+            } else {
+                lines.push('⚠️ ATENÇÃO: Existem não conformidades que devem ser tratadas.');
+                lines.push('');
+                lines.push('📋 RECOMENDAÇÕES:');
+                lines.push('  1. Revise cada item com status NÃO CONFORME');
+                lines.push('  2. Registre as ações corretivas necessárias');
+                lines.push('  3. Agende nova inspeção após as correções');
+            }
 
-        window.showToast?.(`ZIP exportado com sucesso! (${photoCount} fotos)`, 'success', 4000);
-        return true;
+            lines.push('');
+            lines.push(separator);
+            lines.push(`🏁 FIM DO RELATÓRIO - Gerado em ${now.toLocaleString('pt-BR')}`);
+            lines.push(separator);
+
+            this._log('✅ Relatório TXT gerado com sucesso');
+            return lines.join('\n');
+        } catch (error) {
+            this._error('❌ Erro ao gerar relatório TXT', error);
+            return this._getErrorTXT();
+        }
     }
 
+    _getErrorTXT() {
+        return `
+======================================================================
+        ERRO AO GERAR RELATÓRIO
+======================================================================
+❌ Ocorreu um erro ao gerar o relatório.
+
+Por favor, tente novamente ou entre em contato com o suporte.
+
+Erro: Dados inválidos ou incompletos.
+======================================================================
+`;
+    }
+
+    /**
+     * Verifica se o JSZip está disponível
+     */
+    _isJSZipAvailable() {
+        return typeof JSZip !== 'undefined';
+    }
+
+    /**
+     * Exporta o ZIP com fotos e relatório TXT
+     */
+    async exportZip(onProgress) {
+        if (this._isDestroyed) {
+            this._error('❌ Manager destruído');
+            window.showToast?.('❌ Erro ao exportar ZIP', 'error', 3000);
+            return false;
+        }
+
+        this._log('📦 Iniciando exportação ZIP simplificada...');
+
+        try {
+            const data = this.collectAllData();
+            if (!data) {
+                this._error('❌ Falha ao coletar dados');
+                window.showToast?.('❌ Erro ao coletar dados', 'error', 3000);
+                return false;
+            }
+
+            const local = data.identification?.local || 'inspecao';
+            const filename = `inspecao_${local}_${formatDateForFilename()}.zip`;
+
+            // Verificar se há fotos
+            const totalPhotos = Object.values(data.fotos || {}).flat().length;
+            if (totalPhotos === 0) {
+                this._log('⚠️ Nenhuma foto encontrada');
+                const confirm = window.confirm('⚠️ Nenhuma foto adicionada. Deseja exportar o ZIP apenas com o relatório TXT?');
+                if (!confirm) return false;
+            }
+
+            if (this._isJSZipAvailable()) {
+                this._log('📦 Usando JSZip para criar ZIP');
+                return await this._exportWithJSZip(data, filename, onProgress);
+            } else {
+                this._log('⚠️ JSZip não disponível, usando fallback');
+                window.showToast?.('📄 JSZip não disponível. Baixando apenas o relatório TXT.', 'info', 4000);
+                return await this._exportFallback(data, filename, onProgress);
+            }
+        } catch (error) {
+            this._error('❌ Erro ao exportar ZIP', error);
+            window.showToast?.('❌ Erro ao gerar ZIP. Tente novamente.', 'error', 4000);
+            return false;
+        }
+    }
+
+    /**
+     * Exportação usando JSZip - SEM DUPLICAÇÃO
+     */
+    async _exportWithJSZip(data, filename, onProgress) {
+        try {
+            this._log('📦 Criando ZIP com JSZip...');
+            const zip = new JSZip();
+
+            // Adicionar relatório TXT
+            const txtReport = this.generateTXTReport(data);
+            zip.file('relatorio_inspecao.txt', txtReport);
+            this._log('✅ relatorio_inspecao.txt adicionado');
+
+            // Adicionar fotos - usando Set para evitar duplicação
+            let photoCount = 0;
+            const allPhotos = Object.values(data.fotos || {}).flat();
+            const totalPhotos = allPhotos.length;
+            
+            // Usar um Set para rastrear URLs de fotos já adicionadas
+            const addedPhotoUrls = new Set();
+            
+            this._log(`📷 Adicionando ${totalPhotos} fotos ao ZIP...`);
+
+            Object.entries(data.fotos || {}).forEach(([formType, fotos]) => {
+                const folder = `fotos/${formType}`;
+                fotos.forEach((foto, idx) => {
+                    try {
+                        // Criar uma chave única para evitar duplicação
+                        const photoKey = foto.dataUrl || foto.id || `${formType}_${idx}`;
+                        
+                        if (addedPhotoUrls.has(photoKey)) {
+                            this._log(`⚠️ Foto duplicada ignorada: ${foto.name || 'foto'}`);
+                            return;
+                        }
+                        
+                        addedPhotoUrls.add(photoKey);
+                        
+                        const safeName = (foto.name || `evidencia_${idx + 1}.jpg`).replace(/[^a-zA-Z0-9.]/g, '_');
+                        const base64Data = foto.dataUrl ? foto.dataUrl.split(',')[1] : '';
+                        if (base64Data) {
+                            zip.file(`${folder}/${idx + 1}_${safeName}`, base64Data, { base64: true });
+                            photoCount++;
+                            if (onProgress && totalPhotos > 0) {
+                                onProgress(Math.min(100, (photoCount / totalPhotos) * 100));
+                            }
+                        }
+                    } catch (error) {
+                        this._error(`❌ Erro ao adicionar foto ${idx + 1}`, error);
+                    }
+                });
+            });
+
+            this._log(`✅ ${photoCount}/${totalPhotos} fotos adicionadas (${totalPhotos - photoCount} duplicadas ignoradas)`);
+
+            // Gerar ZIP
+            this._log('🔄 Gerando arquivo ZIP...');
+            const blob = await zip.generateAsync({
+                type: 'blob',
+                compression: 'DEFLATE',
+                compressionOptions: { level: 6 }
+            });
+
+            // Download
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+            this._log(`✅ ZIP exportado com sucesso! (${photoCount} fotos únicas)`);
+            window.showToast?.(`✅ ZIP exportado com sucesso! (${photoCount} fotos)`, 'success', 4000);
+            return true;
+        } catch (error) {
+            this._error('❌ Erro na exportação com JSZip', error);
+            window.showToast?.('❌ Erro ao gerar ZIP. Tente novamente.', 'error', 4000);
+            return false;
+        }
+    }
+
+    /**
+     * Fallback quando JSZip não está disponível
+     */
     async _exportFallback(data, filename, onProgress) {
-        const html = this.generateHTMLReport(data);
-        const json = JSON.stringify(data, null, 2);
+        try {
+            this._log('📦 Usando fallback (download separado)...');
+            
+            const txtReport = this.generateTXTReport(data);
 
-        const htmlBlob = new Blob([html], { type: 'text/html;charset=utf-8' });
-        const htmlUrl = URL.createObjectURL(htmlBlob);
-        const htmlLink = document.createElement('a');
-        htmlLink.href = htmlUrl;
-        htmlLink.download = 'relatorio_inspecao.html';
-        document.body.appendChild(htmlLink);
-        htmlLink.click();
-        document.body.removeChild(htmlLink);
-        setTimeout(() => URL.revokeObjectURL(htmlUrl), 5000);
+            // Baixar TXT
+            const txtBlob = new Blob([txtReport], { type: 'text/plain;charset=utf-8' });
+            const txtUrl = URL.createObjectURL(txtBlob);
+            const txtLink = document.createElement('a');
+            txtLink.href = txtUrl;
+            txtLink.download = 'relatorio_inspecao.txt';
+            document.body.appendChild(txtLink);
+            txtLink.click();
+            document.body.removeChild(txtLink);
+            setTimeout(() => URL.revokeObjectURL(txtUrl), 5000);
+            this._log('✅ relatorio_inspecao.txt baixado');
 
-        setTimeout(() => {
-            const jsonBlob = new Blob([json], { type: 'application/json;charset=utf-8' });
-            const jsonUrl = URL.createObjectURL(jsonBlob);
-            const jsonLink = document.createElement('a');
-            jsonLink.href = jsonUrl;
-            jsonLink.download = 'dados.json';
-            document.body.appendChild(jsonLink);
-            jsonLink.click();
-            document.body.removeChild(jsonLink);
-            setTimeout(() => URL.revokeObjectURL(jsonUrl), 5000);
-        }, 1000);
+            window.showToast?.('📄 Relatório TXT baixado com sucesso!', 'success', 3000);
+            return true;
+        } catch (error) {
+            this._error('❌ Erro no fallback de exportação', error);
+            window.showToast?.('❌ Erro ao exportar. Tente novamente.', 'error', 4000);
+            return false;
+        }
+    }
 
-        window.showToast?.('Relatório HTML e JSON baixados separadamente (instale JSZip para ZIP completo)', 'info', 5000);
-        return true;
+    /**
+     * Destroi o manager
+     */
+    destroy() {
+        if (this._isDestroyed) return;
+        this._log('🧹 Destruindo ZipExportManager...');
+        this._isDestroyed = true;
+        this._initialized = false;
+        this.photoManagers = {};
+        this.identification = { local: '', om: '', tag: '' };
+        this._processedPhotoKeys = new Set();
+        this._log('✅ ZipExportManager destruído');
     }
 }
 
+// ==========================================================================
+// INICIALIZAÇÃO ROBUSTA
+// ==========================================================================
+
+let zipExportManager = null;
+let _zipInitAttempts = 0;
+const _maxZipInitAttempts = 10;
+
+/**
+ * Tenta inicializar o ZipExportManager com múltiplas tentativas
+ */
+function initZipExport() {
+    _zipInitAttempts++;
+    
+    try {
+        if (window.zipExportManager && window.zipExportManager.isInitialized && window.zipExportManager.isInitialized()) {
+            console.log('✅ [ZipExport] Manager já inicializado');
+            return;
+        }
+
+        if (typeof CONFIG === 'undefined') {
+            console.warn(`⚠️ [ZipExport] CONFIG não disponível (tentativa ${_zipInitAttempts})`);
+            if (_zipInitAttempts < _maxZipInitAttempts) {
+                setTimeout(initZipExport, 300);
+            }
+            return;
+        }
+
+        zipExportManager = new ZipExportManager();
+        window.zipExportManager = zipExportManager;
+        
+        console.log('✅ [ZipExport] Manager inicializado com sucesso');
+        
+        if (window.App && window.App.state && window.App.state.photoManagers) {
+            Object.entries(window.App.state.photoManagers).forEach(([type, manager]) => {
+                if (manager && manager.initialized) {
+                    zipExportManager.registerPhotoManager(`${type}_evidencias`, manager);
+                }
+            });
+            console.log(`✅ [ZipExport] ${Object.keys(window.App.state.photoManagers).length} managers de fotos registrados`);
+        }
+        
+    } catch (error) {
+        console.error(`❌ [ZipExport] Erro ao inicializar (tentativa ${_zipInitAttempts}):`, error);
+        if (_zipInitAttempts < _maxZipInitAttempts) {
+            setTimeout(initZipExport, 500);
+        }
+    }
+}
+
+// Aguardar DOM carregado
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('📄 [ZipExport] DOM carregado, iniciando inicialização...');
+    setTimeout(initZipExport, 100);
+});
+
+if (window.App && window.App.state && window.App.state.isInitialized) {
+    setTimeout(initZipExport, 200);
+}
+
+window.initZipExport = initZipExport;
 window.ZipExportManager = ZipExportManager;
+
+console.log('📦 [ZipExport] Módulo carregado. Aguardando inicialização...');

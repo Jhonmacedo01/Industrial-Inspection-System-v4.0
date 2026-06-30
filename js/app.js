@@ -1,33 +1,44 @@
 /**
  * INSPECTION FORM v3.1.0
- * Aplicação Principal (Orquestrador) - VERSÃO COMPLETA COM LOCAL, OM, TAG
+ * Aplicação Principal (Orquestrador) - VERSÃO COMPLETA CORRIGIDA
  * @module app
  */
 
 const App = {
-    /** Estado da aplicação */
+    // ==========================================================================
+    // ESTADO DA APLICAÇÃO
+    // ==========================================================================
+
     state: {
         currentTab: 'gnss',
         isInitialized: false,
         progressIntervalId: null,
         fabMenuOpen: false,
-        managersReady: false
+        managersReady: false,
+        photoManagers: {},
+        photoInitAttempts: {},
+        isMobile: false,
+        cameraSupported: true,
+        zipExportReady: false
     },
 
-    /** Referências aos managers */
     managers: {},
-
-    /** Tempo da última atualização global */
     lastGlobalUpdate: 0,
+    _initRetryTimer: null,
+    _photoSetupTimers: [],
+    _zipInitAttempts: 0,
+    _maxZipInitAttempts: 10,
 
-    /**
-     * Inicializa a aplicação
-     */
+    // ==========================================================================
+    // INICIALIZAÇÃO PRINCIPAL
+    // ==========================================================================
+
     async init() {
         console.log(`🚀 Inicializando ${CONFIG.SYSTEM_NAME} v${CONFIG.VERSION}`);
         console.log(`📋 Sistemas: ${Object.values(CONFIG.SYSTEMS).map(s => s.name).join(', ')}`);
         console.log(`💡 Atalhos: Ctrl+S (Exportar) | Ctrl+Shift+R (Reset) | 1-5 (Abas) | Ctrl+H (Ajuda)`);
-        console.log(`📋 Campos globais: LOCAL, OM, TAG disponíveis em todos os formulários`);
+        console.log(`📸 Captura de fotos em alta resolução (até 4K)`);
+        console.log(`📱 Dispositivo: ${this._detectDevice()}`);
 
         try {
             await this._waitForManagers();
@@ -42,11 +53,17 @@ const App = {
             this._setupGlobalDataSync();
             this._showWelcomeMessage();
             this._setupResponsiveAdjustments();
+            this._detectCameraSupport();
+
+            // Forçar inicialização das fotos com múltiplas tentativas
+            this._schedulePhotoSetup();
+
+            // Inicializar ZipExportManager
+            this._initZipExportManager();
 
             this.state.isInitialized = true;
             console.log('✅ Aplicação inicializada com sucesso');
             
-            // Tentar restaurar sessão automaticamente
             setTimeout(() => this._autoRestoreSession(), 500);
         } catch (error) {
             console.error('❌ Erro na inicialização:', error);
@@ -54,13 +71,267 @@ const App = {
         }
     },
 
+    // ==========================================================================
+    // INICIALIZAÇÃO DO ZipExportManager
+    // ==========================================================================
+
+    _initZipExportManager() {
+        console.log('📦 Inicializando ZipExportManager...');
+        this._zipInitAttempts = 0;
+        this._tryInitZipExport();
+    },
+
+    _tryInitZipExport() {
+        this._zipInitAttempts++;
+        
+        try {
+            // Verificar se já existe e está inicializado
+            if (window.zipExportManager && window.zipExportManager.isInitialized && window.zipExportManager.isInitialized()) {
+                console.log('✅ [App] ZipExportManager já inicializado');
+                this.state.zipExportReady = true;
+                return;
+            }
+
+            // Se o manager existe mas não está inicializado, tentar inicializar
+            if (window.zipExportManager && typeof window.zipExportManager.init === 'function') {
+                window.zipExportManager.init();
+                if (window.zipExportManager.isInitialized && window.zipExportManager.isInitialized()) {
+                    console.log('✅ [App] ZipExportManager inicializado via init()');
+                    this.state.zipExportReady = true;
+                    return;
+                }
+            }
+
+            // Tentar criar nova instância
+            if (typeof ZipExportManager !== 'undefined') {
+                window.zipExportManager = new ZipExportManager();
+                if (window.zipExportManager.isInitialized && window.zipExportManager.isInitialized()) {
+                    console.log('✅ [App] ZipExportManager criado e inicializado');
+                    this.state.zipExportReady = true;
+                    
+                    // Registrar os managers de fotos existentes
+                    this._registerPhotoManagersWithZip();
+                    return;
+                }
+            }
+
+            // Se chegou aqui, não conseguiu inicializar
+            console.warn(`⚠️ [App] ZipExportManager não inicializado (tentativa ${this._zipInitAttempts})`);
+            
+            if (this._zipInitAttempts < this._maxZipInitAttempts) {
+                const delay = Math.min(500 * this._zipInitAttempts, 3000);
+                setTimeout(() => this._tryInitZipExport(), delay);
+            } else {
+                console.error('❌ [App] Falha ao inicializar ZipExportManager após múltiplas tentativas');
+                this.state.zipExportReady = false;
+            }
+        } catch (error) {
+            console.error(`❌ [App] Erro ao inicializar ZipExportManager (tentativa ${this._zipInitAttempts}):`, error);
+            
+            if (this._zipInitAttempts < this._maxZipInitAttempts) {
+                const delay = Math.min(500 * this._zipInitAttempts, 3000);
+                setTimeout(() => this._tryInitZipExport(), delay);
+            } else {
+                this.state.zipExportReady = false;
+            }
+        }
+    },
+
+    _registerPhotoManagersWithZip() {
+        if (!window.zipExportManager) return;
+        
+        Object.entries(this.state.photoManagers || {}).forEach(([type, manager]) => {
+            if (manager && manager.initialized) {
+                try {
+                    window.zipExportManager.registerPhotoManager(`${type}_evidencias`, manager);
+                    console.log(`✅ [App] Manager de fotos ${type} registrado no ZipExportManager`);
+                } catch (error) {
+                    console.warn(`⚠️ [App] Erro ao registrar ${type} no ZipExportManager:`, error);
+                }
+            }
+        });
+    },
+
     /**
-     * Aguarda todos os managers estarem disponíveis
+     * Verifica se o ZipExportManager está disponível
      */
+    _isZipExportReady() {
+        return this.state.zipExportReady && window.zipExportManager && window.zipExportManager.isInitialized && window.zipExportManager.isInitialized();
+    },
+
+    /**
+     * Força a inicialização do ZipExportManager
+     */
+    _forceZipExportInit() {
+        if (this._isZipExportReady()) {
+            return true;
+        }
+        
+        console.log('🔄 [App] Forçando inicialização do ZipExportManager...');
+        this._zipInitAttempts = 0;
+        this._tryInitZipExport();
+        
+        // Tentar novamente após 500ms
+        setTimeout(() => {
+            if (!this._isZipExportReady()) {
+                this._tryInitZipExport();
+            }
+        }, 500);
+        
+        return this._isZipExportReady();
+    },
+
+    // ==========================================================================
+    // DETECÇÃO DE DISPOSITIVO E CÂMERA
+    // ==========================================================================
+
+    _detectDevice() {
+        const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|Opera Mini|IEMobile/i.test(navigator.userAgent);
+        this.state.isMobile = isMobile;
+        return isMobile ? '📱 Mobile' : '💻 Desktop';
+    },
+
+    async _detectCameraSupport() {
+        try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                this.state.cameraSupported = false;
+                console.warn('⚠️ Câmera não suportada pelo navegador');
+                return;
+            }
+
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const hasCamera = devices.some(device => device.kind === 'videoinput');
+            
+            if (!hasCamera) {
+                this.state.cameraSupported = false;
+                console.warn('⚠️ Nenhuma câmera encontrada no dispositivo');
+                this.showToast('📷 Nenhuma câmera encontrada. Use a galeria para adicionar fotos.', 'info', 4000);
+            } else {
+                this.state.cameraSupported = true;
+                console.log(`✅ Câmera disponível (${devices.filter(d => d.kind === 'videoinput').length} dispositivo(s))`);
+            }
+        } catch (error) {
+            console.warn('⚠️ Erro ao detectar câmera:', error);
+            this.state.cameraSupported = false;
+        }
+    },
+
+    // ==========================================================================
+    // AGENDAMENTO DE INICIALIZAÇÃO DAS FOTOS
+    // ==========================================================================
+
+    _schedulePhotoSetup() {
+        console.log('📸 Agendando inicialização dos módulos de foto...');
+        
+        if (this._initRetryTimer) {
+            clearTimeout(this._initRetryTimer);
+        }
+        this._photoSetupTimers.forEach(t => clearTimeout(t));
+        this._photoSetupTimers = [];
+
+        setTimeout(() => this._forcePhotoSetup(), 100);
+        this._photoSetupTimers.push(setTimeout(() => this._forcePhotoSetup(), 500));
+        this._photoSetupTimers.push(setTimeout(() => this._forcePhotoSetup(), 1000));
+        this._photoSetupTimers.push(setTimeout(() => this._forcePhotoSetup(), 2000));
+        this._photoSetupTimers.push(setTimeout(() => this._forcePhotoSetup(), 3000));
+        this._photoSetupTimers.push(setTimeout(() => {
+            console.log('🔄 Tentativa final de inicialização das fotos...');
+            this._forcePhotoSetup();
+            this._checkPhotoInitStatus();
+        }, 5000));
+    },
+
+    _forcePhotoSetup() {
+        console.log('🔍 Verificando inicialização dos módulos de foto...');
+        const formTypes = ['gnss', 'cftv', 'radio', 'plc', 'switch'];
+        let successCount = 0;
+        
+        formTypes.forEach(type => {
+            const manager = this.managers[type];
+            if (!manager) {
+                console.warn(`⚠️ Manager ${type} não disponível`);
+                return;
+            }
+
+            if (!this.state.photoInitAttempts[type]) {
+                this.state.photoInitAttempts[type] = 0;
+            }
+            this.state.photoInitAttempts[type]++;
+
+            if (manager.photoManager && manager.photoManager.initialized) {
+                console.log(`✅ PhotoManager já inicializado para ${type}`);
+                successCount++;
+                return;
+            }
+
+            const container = document.getElementById(`${type}-photo-upload`);
+            if (!container) {
+                console.warn(`⚠️ Container ${type}-photo-upload não encontrado (tentativa ${this.state.photoInitAttempts[type]})`);
+                return;
+            }
+
+            try {
+                let initialized = false;
+                
+                if (typeof manager.setupPhoto === 'function') {
+                    manager.setupPhoto();
+                    initialized = true;
+                    console.log(`✅ setupPhoto chamado para ${type} (tentativa ${this.state.photoInitAttempts[type]})`);
+                } else if (typeof manager._setupPhotoUpload === 'function') {
+                    manager._setupPhotoUpload();
+                    initialized = true;
+                    console.log(`✅ _setupPhotoUpload chamado para ${type} (tentativa ${this.state.photoInitAttempts[type]})`);
+                } else {
+                    console.warn(`⚠️ Nenhum método de foto encontrado para ${type}`);
+                }
+                
+                if (initialized) {
+                    successCount++;
+                }
+            } catch (error) {
+                console.error(`❌ Erro ao inicializar fotos para ${type}:`, error);
+            }
+        });
+
+        if (successCount === formTypes.length) {
+            console.log(`✅ Todos os ${formTypes.length} módulos de foto inicializados!`);
+        } else {
+            console.log(`ℹ️ ${successCount}/${formTypes.length} módulos de foto inicializados`);
+        }
+    },
+
+    _checkPhotoInitStatus() {
+        console.log('📊 Verificando status final dos módulos de foto...');
+        const formTypes = ['gnss', 'cftv', 'radio', 'plc', 'switch'];
+        let allInitialized = true;
+        
+        formTypes.forEach(type => {
+            const manager = this.managers[type];
+            if (manager) {
+                const isInit = manager.photoManager && manager.photoManager.initialized;
+                console.log(`  ${isInit ? '✅' : '❌'} ${type}: ${isInit ? 'Inicializado' : 'Não inicializado'}`);
+                if (!isInit) allInitialized = false;
+            }
+        });
+
+        if (!allInitialized) {
+            console.log('⚠️ Alguns módulos de foto não foram inicializados. Verifique os logs acima.');
+        }
+    },
+
+    // ==========================================================================
+    // GESTÃO DE MANAGERS
+    // ==========================================================================
+
     async _waitForManagers() {
-        const requiredManagers = ['gnssForm', 'cftvForm', 'radioForm', 'plcForm', 'switchForm', 'exportManager', 'autoSaveManager'];
-        const maxWait = 8000;
+        const requiredManagers = [
+            'gnssForm', 'cftvForm', 'radioForm', 'plcForm', 'switchForm',
+            'exportManager', 'autoSaveManager'
+        ];
+        const maxWait = 10000;
         const start = Date.now();
+
+        console.log('⏳ Aguardando managers...');
 
         while (Date.now() - start < maxWait) {
             const allReady = requiredManagers.every(name => window[name]);
@@ -73,7 +344,6 @@ const App = {
                     switch: window.switchForm
                 };
                 
-                // Registrar observers para cada manager
                 Object.values(this.managers).forEach(manager => {
                     if (manager && typeof manager.addObserver === 'function') {
                         manager.addObserver(() => this._onFormDataChange());
@@ -81,6 +351,7 @@ const App = {
                 });
                 
                 this.state.managersReady = true;
+                console.log('✅ Todos os managers prontos');
                 return;
             }
             await new Promise(resolve => setTimeout(resolve, 100));
@@ -90,9 +361,10 @@ const App = {
         this.state.managersReady = true;
     },
 
-    /**
-     * Configura navegação por abas
-     */
+    // ==========================================================================
+    // NAVEGAÇÃO POR ABAS
+    // ==========================================================================
+
     _setupTabNavigation() {
         const tabs = document.querySelectorAll('.tab-button');
         const panels = document.querySelectorAll('.tab-panel');
@@ -102,7 +374,6 @@ const App = {
                 const tabId = tab.dataset.tab;
                 if (!tabId || tabId === this.state.currentTab) return;
 
-                // Atualizar abas
                 tabs.forEach(t => {
                     t.classList.remove('is-active');
                     t.setAttribute('aria-selected', 'false');
@@ -112,7 +383,6 @@ const App = {
                 tab.setAttribute('aria-selected', 'true');
                 tab.setAttribute('tabindex', '0');
 
-                // Atualizar painéis
                 panels.forEach(panel => panel.classList.remove('is-visible'));
                 const targetPanel = document.getElementById(`panel-${tabId}`);
                 if (targetPanel) targetPanel.classList.add('is-visible');
@@ -124,18 +394,31 @@ const App = {
                     1500
                 );
 
-                // Scroll suave
                 document.querySelector('.main-content')?.scrollIntoView({
                     behavior: 'smooth',
                     block: 'start'
                 });
+
+                setTimeout(() => {
+                    const manager = this.managers[tabId];
+                    if (manager) {
+                        if (typeof manager.setupPhoto === 'function') {
+                            manager.setupPhoto();
+                        } else if (typeof manager._setupPhotoUpload === 'function') {
+                            manager._setupPhotoUpload();
+                        }
+                    }
+                }, 300);
             });
         });
+
+        console.log('✅ Navegação por abas configurada');
     },
 
-    /**
-     * Configura painel de identificação GLOBAL (LOCAL, OM, TAG)
-     */
+    // ==========================================================================
+    // PAINEL DE IDENTIFICAÇÃO (LOCAL, OM, TAG)
+    // ==========================================================================
+
     _setupIdentificationPanel() {
         const toggle = document.getElementById('idPanelToggle');
         const panel = document.getElementById('identificationPanel');
@@ -148,11 +431,9 @@ const App = {
                 if (icon) {
                     icon.style.transform = panel.classList.contains('is-collapsed') ? 'rotate(180deg)' : 'rotate(0deg)';
                 }
-                // Salvar estado do painel
                 localStorage.setItem('inspform_panel_collapsed', panel.classList.contains('is-collapsed'));
             });
             
-            // Restaurar estado do painel
             const wasCollapsed = localStorage.getItem('inspform_panel_collapsed') === 'true';
             if (wasCollapsed) {
                 panel.classList.add('is-collapsed');
@@ -161,7 +442,6 @@ const App = {
             }
         }
 
-        // Configurar campos de identificação global
         const idFields = [
             { id: 'globalLocal', field: 'local', label: 'LOCAL' },
             { id: 'globalOM', field: 'om', label: 'OM' },
@@ -171,7 +451,6 @@ const App = {
         idFields.forEach(({ id, field, label }) => {
             const element = document.getElementById(id);
             if (element) {
-                // Evento para salvar
                 element.addEventListener('input', debounce(() => {
                     this._saveIdentification();
                     this._syncGlobalDataToAllForms();
@@ -184,7 +463,6 @@ const App = {
                     }
                 }, 500));
                 
-                // Restaurar valor salvo
                 const saved = this._loadIdentification();
                 if (saved && saved[field]) {
                     element.value = saved[field];
@@ -193,7 +471,6 @@ const App = {
                     }
                 }
                 
-                // Indicador Visual de preenchido
                 element.addEventListener('focus', () => {
                     element.parentElement?.classList.add('id-field--focused');
                 });
@@ -203,7 +480,6 @@ const App = {
             }
         });
         
-        // Expandir painel se algum campo estiver vazio
         const hasEmptyFields = idFields.some(({ id }) => {
             const el = document.getElementById(id);
             return !el || !el.value.trim();
@@ -216,9 +492,6 @@ const App = {
         console.log('✅ Painel de identificação configurado (LOCAL, OM, TAG)');
     },
 
-    /**
-     * Salva identificação no localStorage
-     */
     _saveIdentification() {
         const data = {
             local: document.getElementById('globalLocal')?.value || '',
@@ -228,7 +501,6 @@ const App = {
         };
         localStorage.setItem('inspform_identification', JSON.stringify(data));
         
-        // Atualizar indicador visual
         const autoSaveIndicator = document.getElementById('autoSaveIndicator');
         if (autoSaveIndicator) {
             autoSaveIndicator.style.opacity = '0.7';
@@ -238,9 +510,6 @@ const App = {
         }
     },
 
-    /**
-     * Carrega identificação do localStorage
-     */
     _loadIdentification() {
         try {
             const raw = localStorage.getItem('inspform_identification');
@@ -258,9 +527,6 @@ const App = {
         return null;
     },
 
-    /**
-     * Sincroniza dados globais (LOCAL, OM, TAG) para todos os formulários
-     */
     _syncGlobalDataToAllForms() {
         const identification = this._loadIdentification();
         if (!identification) return;
@@ -272,19 +538,18 @@ const App = {
         console.log('🔄 Dados globais sincronizados:', identification);
     },
 
-    /**
-     * Configura sincronização global de dados entre formulários
-     */
     _setupGlobalDataSync() {
         window.addEventListener('globalDataUpdated', (e) => {
             const { identification } = e.detail;
             
-            // Atualizar campos nos reports (exportação)
             if (window.exportManager && window.exportManager.setIdentification) {
                 window.exportManager.setIdentification(identification);
             }
             
-            // Atualizar badge de identificação nos headers das seções
+            if (window.zipExportManager && window.zipExportManager.setIdentification) {
+                window.zipExportManager.setIdentification(identification);
+            }
+            
             const sections = document.querySelectorAll('.section-heading');
             const hasAnyId = identification.local || identification.om || identification.tag;
             
@@ -303,20 +568,20 @@ const App = {
             });
         });
         
-        // Disparar sincronização inicial
         setTimeout(() => this._syncGlobalDataToAllForms(), 100);
+        console.log('✅ Sincronização global de dados configurada');
     },
 
-    /**
-     * Configura botão flutuante de ações (FAB)
-     */
+    // ==========================================================================
+    // BOTÕES FLUTUANTES (FAB) - COM VERIFICAÇÃO DO ZipExportManager
+    // ==========================================================================
+
     _setupFloatingActions() {
         const fabMain = document.getElementById('fabMain');
         const fabMenu = document.getElementById('fabMenu');
         
         if (!fabMain || !fabMenu) return;
         
-        // Toggle do menu
         fabMain.addEventListener('click', (e) => {
             e.stopPropagation();
             this.state.fabMenuOpen = !this.state.fabMenuOpen;
@@ -330,7 +595,6 @@ const App = {
             }
         });
         
-        // Fechar ao clicar fora
         document.addEventListener('click', (e) => {
             if (this.state.fabMenuOpen && !fabMain.contains(e.target) && !fabMenu.contains(e.target)) {
                 this.state.fabMenuOpen = false;
@@ -340,11 +604,48 @@ const App = {
             }
         });
         
-        // Ações do menu (incluindo exportações individuais)
         const actions = {
-            'export-full': () => window.exportManager?.downloadReport('full'),
-            'export-summary': () => window.exportManager?.downloadReport('summary'),
-            'export-json': () => window.exportManager?.downloadJSON(),
+            'export-full': () => {
+                if (window.exportManager) {
+                    window.exportManager.downloadReport('full');
+                } else {
+                    this.showToast('⚠️ ExportManager não disponível', 'warning');
+                }
+            },
+            'export-summary': () => {
+                if (window.exportManager) {
+                    window.exportManager.downloadReport('summary');
+                } else {
+                    this.showToast('⚠️ ExportManager não disponível', 'warning');
+                }
+            },
+            'export-json': () => {
+                if (window.exportManager) {
+                    window.exportManager.downloadJSON();
+                } else {
+                    this.showToast('⚠️ ExportManager não disponível', 'warning');
+                }
+            },
+            'export-zip': () => {
+                // Verificar se o ZipExportManager está disponível
+                if (!this._isZipExportReady()) {
+                    this.showToast('⏳ Aguardando ZipExportManager...', 'info', 2000);
+                    this._forceZipExportInit();
+                    
+                    // Tentar novamente após 1 segundo
+                    setTimeout(() => {
+                        if (this._isZipExportReady()) {
+                            this._exportZipWithPhotos();
+                        } else {
+                            this.showToast('⚠️ ZipExportManager não disponível. Use o fallback.', 'warning', 3000);
+                            // Fallback: baixar relatório TXT
+                            this._exportZipFallback();
+                        }
+                    }, 1000);
+                    return;
+                }
+                this._exportZipWithPhotos();
+            },
             'export-gnss': () => this._downloadSingleForm('gnss', 'GNSS'),
             'export-cftv': () => this._downloadSingleForm('cftv', 'CFTV'),
             'export-radio': () => this._downloadSingleForm('radio', 'RÁDIO'),
@@ -370,11 +671,107 @@ const App = {
                 });
             }
         });
+
+        console.log('✅ Botões flutuantes configurados');
+    },
+
+    // ==========================================================================
+    // EXPORTAÇÃO ZIP COM VERIFICAÇÃO
+    // ==========================================================================
+
+    async _exportZipWithPhotos() {
+        if (!this._isZipExportReady()) {
+            this.showToast('⚠️ ZipExportManager não disponível', 'error', 3000);
+            return;
+        }
+
+        const zipManager = window.zipExportManager;
+        
+        // Verificar se há fotos
+        let totalPhotos = 0;
+        Object.values(this.state.photoManagers || {}).forEach(manager => {
+            if (manager && typeof manager.getCount === 'function') {
+                totalPhotos += manager.getCount();
+            }
+        });
+
+        console.log(`📦 Exportando ZIP com ${totalPhotos} fotos...`);
+
+        if (totalPhotos === 0) {
+            const confirm = window.confirm(
+                '⚠️ Nenhuma foto adicionada. Deseja exportar o ZIP sem fotos?'
+            );
+            if (!confirm) return;
+        }
+
+        const toast = this.showToast('⏳ Gerando ZIP em alta qualidade...', 'info', 0);
+
+        try {
+            await zipManager.exportZip((progress) => {
+                if (toast) {
+                    const content = toast.querySelector('.toast-content');
+                    if (content) {
+                        content.textContent = `⏳ Gerando ZIP... ${Math.round(progress)}%`;
+                    }
+                }
+            });
+
+            if (toast) this._removeToast(toast);
+            this.showToast(`✅ ZIP exportado com sucesso! (${totalPhotos} fotos em alta resolução)`, 'success', 4000);
+            console.log('✅ ZIP exportado com sucesso');
+        } catch (error) {
+            console.error('❌ Erro ao exportar ZIP:', error);
+            if (toast) this._removeToast(toast);
+            this.showToast('❌ Erro ao gerar ZIP. Tente novamente.', 'error', 4000);
+            
+            // Fallback: baixar relatório TXT
+            this._exportZipFallback();
+        }
     },
 
     /**
-     * Download de um único formulário
+     * Fallback quando o ZIP não funciona - baixar apenas o TXT
      */
+    _exportZipFallback() {
+        console.log('📄 Usando fallback - baixando apenas relatório TXT');
+        
+        try {
+            // Tentar usar o ZipExportManager para gerar o TXT
+            if (window.zipExportManager && typeof window.zipExportManager.generateTXTReport === 'function') {
+                const data = window.zipExportManager.collectAllData();
+                if (data) {
+                    const txtReport = window.zipExportManager.generateTXTReport(data);
+                    const blob = new Blob([txtReport], { type: 'text/plain;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `relatorio_inspecao_${formatDateForFilename()}.txt`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    setTimeout(() => URL.revokeObjectURL(url), 5000);
+                    this.showToast('📄 Relatório TXT exportado com sucesso!', 'success', 3000);
+                    return;
+                }
+            }
+            
+            // Fallback final: usar o exportManager
+            if (window.exportManager) {
+                window.exportManager.downloadReport('full');
+                this.showToast('📄 Relatório exportado como alternativa', 'info', 3000);
+            } else {
+                this.showToast('❌ Nenhum método de exportação disponível', 'error', 3000);
+            }
+        } catch (error) {
+            console.error('❌ Erro no fallback de exportação:', error);
+            this.showToast('❌ Erro ao exportar. Tente novamente.', 'error', 4000);
+        }
+    },
+
+    // ==========================================================================
+    // DOWNLOAD DE FORMULÁRIO INDIVIDUAL
+    // ==========================================================================
+
     _downloadSingleForm(formType, displayName) {
         if (!window.exportManager) {
             this.showToast('ExportManager não disponível', 'error');
@@ -391,19 +788,16 @@ const App = {
         
         const data = manager.getData();
         
-        // Verificar se há dados preenchidos
         const hasData = data.items && data.items.some(item => item.status);
         if (!hasData) {
             this.showToast(`Nenhum dado preenchido no formulário ${displayName}`, 'warning', 3000);
             return;
         }
         
-        // Verificar identificação
         if (!identification.local && !identification.om && !identification.tag) {
             this.showToast('⚠️ Recomendado preencher LOCAL, OM e TAG antes de exportar', 'warning', 3000);
         }
         
-        // Gerar conteúdo individual
         const now = new Date();
         const lines = [];
         
@@ -413,7 +807,6 @@ const App = {
         lines.push(`📅 Data: ${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR')}`);
         lines.push('');
         
-        // Adicionar identificação LOCAL, OM, TAG
         lines.push('-'.repeat(52));
         lines.push('📋 DADOS DE IDENTIFICAÇÃO DA INSPEÇÃO');
         lines.push('-'.repeat(52));
@@ -425,7 +818,6 @@ const App = {
         }
         lines.push('');
         
-        // Itens do formulário
         lines.push('-'.repeat(52));
         lines.push(`📋 INSPEÇÃO - ${displayName}`);
         lines.push('-'.repeat(52));
@@ -442,7 +834,6 @@ const App = {
             }
         });
         
-        // Dados especiais (Rádio)
         if (formType === 'radio' && data.alarms) {
             const metrics = [];
             if (data.alarms.ber) metrics.push(`BER: ${data.alarms.ber}`);
@@ -456,7 +847,6 @@ const App = {
             }
         }
         
-        // Dados especiais (PLC LEDs)
         if (formType === 'plc' && data.leds) {
             const leds = [];
             if (data.leds.fontes) leds.push(`Fontes: ${data.leds.fontes}`);
@@ -471,7 +861,6 @@ const App = {
             }
         }
         
-        // Dados especiais (Switch Temperatura)
         if (formType === 'switch' && data.specialFields?.temperature) {
             const temp = data.specialFields.temperature;
             const tempStatus = parseFloat(temp) > 60 ? '⚠️ ALTA' : '✓ Normal';
@@ -479,7 +868,6 @@ const App = {
             lines.push('');
         }
         
-        // Resumo
         const okCount = data.items.filter(i => i.status === 'OK').length;
         const nokCount = data.items.filter(i => i.status === 'NOK').length;
         
@@ -498,12 +886,9 @@ const App = {
         const filename = `inspecao_${formType}_${displayName.toLowerCase()}_${formatDateForFilename()}.txt`;
         
         this._downloadFile(content, filename, 'text/plain');
-        this.showToast(`Relatório ${displayName} exportado!`, 'success', 3000);
+        this.showToast(`✅ Relatório ${displayName} exportado!`, 'success', 3000);
     },
-    
-    /**
-     * Download de arquivo
-     */
+
     _downloadFile(content, filename, mimeType) {
         const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
         const url = URL.createObjectURL(blob);
@@ -517,9 +902,10 @@ const App = {
         URL.revokeObjectURL(url);
     },
 
-    /**
-     * Salva todos os formulários manualmente
-     */
+    // ==========================================================================
+    // SALVAR E RESTAURAR SESSÃO
+    // ==========================================================================
+
     _saveAllFormsManually() {
         let savedCount = 0;
         
@@ -536,15 +922,13 @@ const App = {
         this._saveIdentification();
         
         if (savedCount > 0) {
-            this.showToast(`${savedCount} formulários salvos!`, 'success', 2000);
+            this.showToast(`💾 ${savedCount} formulários salvos!`, 'success', 2000);
+            console.log(`💾 ${savedCount} formulários salvos manualmente`);
         } else {
-            this.showToast('Nenhum dado para salvar', 'info', 1500);
+            this.showToast('ℹ️ Nenhum dado para salvar', 'info', 1500);
         }
     },
 
-    /**
-     * Restaura todos os formulários manualmente
-     */
     _restoreAllFormsManually() {
         if (!window.autoSaveManager) {
             this.showToast('AutoSave não disponível', 'error');
@@ -554,36 +938,37 @@ const App = {
         const restored = window.autoSaveManager.restoreAll();
         
         if (restored === 0) {
-            this.showToast('Nenhum dado salvo encontrado', 'info', 2000);
+            this.showToast('ℹ️ Nenhum dado salvo encontrado', 'info', 2000);
         } else {
             this._syncGlobalDataToAllForms();
+            this.showToast(`📂 ${restored} formulários restaurados!`, 'success', 3000);
         }
     },
 
-    /**
-     * Restaura sessão automaticamente ao carregar
-     */
     _autoRestoreSession() {
         if (window.autoSaveManager && window.autoSaveManager.hasSavedData()) {
             setTimeout(() => {
-                const shouldRestore = confirm('Dados salvos encontrados. Deseja restaurar a sessão anterior?');
+                const shouldRestore = confirm('💾 Dados salvos encontrados. Deseja restaurar a sessão anterior?');
                 if (shouldRestore) {
                     window.autoSaveManager.restoreAll();
                     this._syncGlobalDataToAllForms();
-                    this.showToast('Sessão restaurada com sucesso!', 'success', 3000);
+                    this.showToast('✅ Sessão restaurada com sucesso!', 'success', 3000);
+                    console.log('📂 Sessão restaurada automaticamente');
                 }
             }, 800);
         }
     },
 
-    /**
-     * Confirma reset de todos os formulários
-     */
+    // ==========================================================================
+    // RESET DE FORMULÁRIOS
+    // ==========================================================================
+
     _confirmResetAll() {
         const confirmed = confirm(
             '⚠️ ATENÇÃO: Isso irá limpar TODOS os dados preenchidos em TODOS os formulários.\n\n' +
-            'Os campos LOCAL, OM e TAG também serão limpos.\n\n' +
-            'Esta ação não pode ser desfeita.\n\n' +
+            '📋 Os campos LOCAL, OM e TAG também serão limpos.\n\n' +
+            '📸 Todas as fotos adicionadas serão removidas.\n\n' +
+            '❌ Esta ação não pode ser desfeita.\n\n' +
             'Deseja continuar?'
         );
         
@@ -592,9 +977,6 @@ const App = {
         }
     },
 
-    /**
-     * Reseta todos os formulários
-     */
     resetAllForms() {
         let resetCount = 0;
         
@@ -605,7 +987,6 @@ const App = {
             }
         });
         
-        // Limpar campos de identificação LOCAL, OM, TAG
         const idFields = ['globalLocal', 'globalOM', 'globalTAG'];
         idFields.forEach(id => {
             const el = document.getElementById(id);
@@ -615,44 +996,50 @@ const App = {
             }
         });
         
-        // Limpar localStorage dos formulários
+        Object.values(this.state.photoManagers || {}).forEach(manager => {
+            if (manager && typeof manager.clearPhotos === 'function') {
+                manager.clearPhotos();
+            }
+        });
+        
         if (window.autoSaveManager) {
             window.autoSaveManager.clearAll();
         }
         
         localStorage.removeItem('inspform_identification');
         
-        this.showToast(`${resetCount} formulários resetados!`, 'success', 3000);
+        this.showToast(`🗑️ ${resetCount} formulários resetados!`, 'success', 3000);
         this._updateGlobalProgress();
         
-        console.log('🔴 Todos os formulários foram resetados (incluindo LOCAL, OM, TAG)');
+        console.log('🔴 Todos os formulários foram resetados (incluindo LOCAL, OM, TAG e fotos)');
     },
 
-    /**
-     * Configura atalhos de teclado
-     */
+    // ==========================================================================
+    // ATALHOS DE TECLADO
+    // ==========================================================================
+
     _setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
-            // Ctrl+S
             if (e.ctrlKey && e.key === 's') {
                 e.preventDefault();
-                window.exportManager?.downloadReport('full');
-                this.showToast('Exportando relatório...', 'info', 1000);
+                if (window.exportManager) {
+                    window.exportManager.downloadReport('full');
+                    this.showToast('📤 Exportando relatório...', 'info', 1000);
+                } else {
+                    this.showToast('⚠️ ExportManager não disponível', 'warning');
+                }
             }
 
-            // Ctrl+Shift+R
             if (e.ctrlKey && e.shiftKey && (e.key === 'R' || e.key === 'r')) {
                 e.preventDefault();
                 this._confirmResetAll();
             }
 
-            // Ctrl+H
             if (e.ctrlKey && e.key === 'h') {
                 e.preventDefault();
                 this._openShortcutsModal();
             }
 
-            // Esc - fechar menu FAB e modais
             if (e.key === 'Escape') {
                 if (this.state.fabMenuOpen) {
                     this.state.fabMenuOpen = false;
@@ -664,7 +1051,6 @@ const App = {
                 this._closeModal();
             }
 
-            // Navegação 1-5 (apenas fora de inputs)
             if (!e.ctrlKey && !e.altKey && !e.metaKey &&
                 !['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) {
                 const num = parseInt(e.key);
@@ -674,7 +1060,7 @@ const App = {
                     const tab = document.querySelector(`.tab-button[data-tab="${tabsMap[num]}"]`);
                     if (tab) {
                         tab.click();
-                        this.showToast(`Aba ${tabsMap[num].toUpperCase()}`, 'info', 800);
+                        this.showToast(`🔢 Aba ${tabsMap[num].toUpperCase()}`, 'info', 800);
                     }
                 }
             }
@@ -683,22 +1069,21 @@ const App = {
         console.log('⌨️ Atalhos de teclado configurados');
     },
 
-    /**
-     * Configura barra de progresso global
-     */
+    // ==========================================================================
+    // BARRA DE PROGRESSO GLOBAL
+    // ==========================================================================
+
     _setupGlobalProgress() {
         this._updateGlobalProgress();
         
-        // Atualizar progresso periodicamente
         if (this.state.progressIntervalId) {
             clearInterval(this.state.progressIntervalId);
         }
         this.state.progressIntervalId = setInterval(() => this._updateGlobalProgress(), 1000);
+        
+        console.log('📊 Barra de progresso global configurada');
     },
 
-    /**
-     * Atualiza barra de progresso global
-     */
     _updateGlobalProgress() {
         let totalItems = 0;
         let completedItems = 0;
@@ -733,9 +1118,6 @@ const App = {
         return progress;
     },
 
-    /**
-     * Callback quando dados do formulário mudam
-     */
     _onFormDataChange() {
         const now = Date.now();
         if (now - this.lastGlobalUpdate > 500) {
@@ -744,16 +1126,16 @@ const App = {
         }
     },
 
-    /**
-     * Conecta AutoSave aos formulários
-     */
+    // ==========================================================================
+    // AUTOSAVE
+    // ==========================================================================
+
     _connectAutoSave() {
         if (!window.autoSaveManager) {
             console.warn('AutoSaveManager não disponível');
             return;
         }
         
-        // Registrar callbacks
         window.autoSaveManager.onSave((formType, data) => {
             console.log(`💾 AutoSave: ${formType} salvo`);
             const indicator = document.getElementById('autoSaveIndicator');
@@ -772,11 +1154,11 @@ const App = {
         console.log('🔌 AutoSave conectado aos formulários');
     },
 
-    /**
-     * Adiciona botão de reset na interface
-     */
+    // ==========================================================================
+    // BOTÃO DE RESET
+    // ==========================================================================
+
     _addResetButton() {
-        // Verificar se já existe
         if (document.querySelector('.reset-bar')) return;
         
         const resetBar = document.createElement('div');
@@ -784,7 +1166,7 @@ const App = {
         resetBar.innerHTML = `
             <button class="btn-reset" id="globalResetBtn" title="Limpar todos os formulários (Ctrl+Shift+R)">
                 <i class="fas fa-trash-alt"></i>
-                <span>Limpar Todos os Formulários</span>
+                <span>🗑️ Limpar Todos os Formulários</span>
             </button>
         `;
         
@@ -802,11 +1184,14 @@ const App = {
         if (resetBtn) {
             resetBtn.addEventListener('click', () => this._confirmResetAll());
         }
+        
+        console.log('🔄 Botão de reset adicionado');
     },
-    
-    /**
-     * Configura modal de atalhos
-     */
+
+    // ==========================================================================
+    // MODAL DE ATALHOS
+    // ==========================================================================
+
     _setupModal() {
         const modal = document.getElementById('shortcutsModal');
         const closeBtn = modal?.querySelector('.modal-close');
@@ -820,39 +1205,32 @@ const App = {
             confirmBtn.addEventListener('click', () => this._closeModal());
         }
         
-        // Fechar ao clicar no overlay
         if (modal) {
             modal.addEventListener('click', (e) => {
                 if (e.target === modal) this._closeModal();
             });
         }
         
-        // Fechar com ESC
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && modal?.classList.contains('is-open')) {
                 this._closeModal();
             }
         });
+        
+        console.log('📋 Modal de atalhos configurado');
     },
-    
-    /**
-     * Abre modal de atalhos
-     */
+
     _openShortcutsModal() {
         const modal = document.getElementById('shortcutsModal');
         if (modal) {
             modal.classList.add('is-open');
             modal.setAttribute('aria-hidden', 'false');
             
-            // Focar no modal
             const firstFocusable = modal.querySelector('button, [href], input, select, textarea');
             if (firstFocusable) firstFocusable.focus();
         }
     },
-    
-    /**
-     * Fecha modal
-     */
+
     _closeModal() {
         const modal = document.getElementById('shortcutsModal');
         if (modal) {
@@ -860,10 +1238,11 @@ const App = {
             modal.setAttribute('aria-hidden', 'true');
         }
     },
-    
-    /**
-     * Configura ajustes responsivos
-     */
+
+    // ==========================================================================
+    // RESPONSIVIDADE
+    // ==========================================================================
+
     _setupResponsiveAdjustments() {
         const handleResize = () => {
             const isMobile = window.innerWidth <= 768;
@@ -890,24 +1269,25 @@ const App = {
         
         window.addEventListener('resize', handleResize);
         handleResize();
+        
+        console.log('📱 Ajustes responsivos configurados');
     },
-    
-    /**
-     * Exibe mensagem de boas-vindas
-     */
+
+    // ==========================================================================
+    // MENSAGENS E TOASTS
+    // ==========================================================================
+
     _showWelcomeMessage() {
         setTimeout(() => {
+            const deviceMsg = this.state.isMobile ? '📱 Modo mobile detectado' : '💻 Modo desktop';
             this.showToast(
-                `👋 Bem-vindo ao ${CONFIG.SYSTEM_NAME} v${CONFIG.VERSION} | Preencha LOCAL, OM e TAG para identificar a inspeção`,
+                `👋 Bem-vindo ao ${CONFIG.SYSTEM_NAME} v${CONFIG.VERSION} | ${deviceMsg} | Preencha LOCAL, OM e TAG para identificar a inspeção`,
                 'info',
                 5000
             );
         }, 300);
     },
-    
-    /**
-     * Exibe toast de notificação
-     */
+
     showToast(message, type = 'info', duration = 4000) {
         const toastStack = document.getElementById('toastStack');
         if (!toastStack) return;
@@ -939,24 +1319,58 @@ const App = {
         
         return toast;
     },
-    
-    /**
-     * Remove toast da tela
-     */
+
     _removeToast(toast) {
         if (!toast || !toast.parentNode) return;
         toast.classList.add('is-exiting');
         setTimeout(() => {
             if (toast.parentNode) toast.parentNode.removeChild(toast);
         }, 300);
+    },
+
+    // ==========================================================================
+    // MÉTODOS DE UTILIDADE
+    // ==========================================================================
+
+    getPhotoManager(formType) {
+        return this.state.photoManagers[formType] || null;
+    },
+
+    getAllPhotoManagers() {
+        return { ...this.state.photoManagers };
+    },
+
+    getTotalPhotos() {
+        let total = 0;
+        Object.values(this.state.photoManagers || {}).forEach(manager => {
+            if (manager && typeof manager.getCount === 'function') {
+                total += manager.getCount();
+            }
+        });
+        return total;
+    },
+
+    isPhotoManagerReady(formType) {
+        const manager = this.state.photoManagers[formType];
+        return manager && manager.initialized === true;
     }
 };
 
-// Inicializar ao carregar
+// ==========================================================================
+// INICIALIZAÇÃO
+// ==========================================================================
+
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('📄 DOM carregado, iniciando aplicação...');
     setTimeout(() => App.init(), 100);
 });
 
 // Expor funções globalmente
 window.showToast = (message, type, duration) => App.showToast(message, type, duration);
 window.App = App;
+window.getPhotoManager = (formType) => App.getPhotoManager(formType);
+window.getAllPhotoManagers = () => App.getAllPhotoManagers();
+window.getTotalPhotos = () => App.getTotalPhotos();
+
+console.log('✅ App carregado. Versão:', CONFIG.VERSION);
+console.log('📚 Sistemas disponíveis:', Object.keys(CONFIG.SYSTEMS).join(', '));

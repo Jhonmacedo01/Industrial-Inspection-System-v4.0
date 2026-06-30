@@ -1,6 +1,6 @@
 /**
- * INSPECTION FORM v3.0.0
- * Classe Base para Formulários de Inspeção
+ * INSPECTION FORM v3.1.0
+ * Classe Base para Formulários de Inspeção - VERSÃO PROFISSIONAL
  * @module base-form
  */
 
@@ -21,15 +21,42 @@ class BaseFormManager {
         this.items = [];
         this.observers = [];
         this.initialized = false;
+        this.photoManager = null;
+        this._photoRetryCount = 0;
+        this._maxPhotoRetries = 8;
+        this._photoSetupTimers = [];
+        this._debug = true;
+    }
+
+    /**
+     * Log de debug com emojis
+     */
+    _log(message, data = null) {
+        if (this._debug) {
+            if (data) {
+                console.log(`[${this.formType}] ${message}`, data);
+            } else {
+                console.log(`[${this.formType}] ${message}`);
+            }
+        }
+    }
+
+    /**
+     * Log de erro
+     */
+    _error(message, error = null) {
+        console.error(`[${this.formType}] ❌ ${message}`, error || '');
     }
 
     /**
      * Inicializa o formulário
      */
     init() {
+        this._log('🚀 Inicializando formulário...');
+        
         this.container = document.getElementById(this.containerId);
         if (!this.container) {
-            console.warn(`[${this.formType}] Container #${this.containerId} não encontrado`);
+            this._error(`Container #${this.containerId} não encontrado`);
             return;
         }
 
@@ -37,7 +64,33 @@ class BaseFormManager {
         this.attachEvents();
         this.updateSummary();
         this.initialized = true;
-        console.log(`[${this.formType}] Formulário inicializado (${this.itemsConfig.length} itens)`);
+        
+        // Agendar inicialização das fotos com múltiplas tentativas
+        this._schedulePhotoSetup();
+        
+        this._log(`✅ Formulário inicializado (${this.itemsConfig.length} itens)`);
+    }
+
+    /**
+     * Agenda a inicialização das fotos com múltiplas tentativas
+     */
+    _schedulePhotoSetup() {
+        this._log('📸 Agendando inicialização do módulo de fotos...');
+        
+        // Limpar timers anteriores
+        this._photoSetupTimers.forEach(t => clearTimeout(t));
+        this._photoSetupTimers = [];
+
+        // Tentativas escalonadas
+        const delays = [200, 500, 800, 1200, 1800, 2500, 3500, 5000];
+        
+        delays.forEach((delay, index) => {
+            const timer = setTimeout(() => {
+                this._log(`🔄 Tentativa ${index + 1}/${delays.length} para inicializar fotos...`);
+                this._setupPhotoUpload();
+            }, delay);
+            this._photoSetupTimers.push(timer);
+        });
     }
 
     /**
@@ -158,6 +211,7 @@ class BaseFormManager {
                     this._updateCardVisual(item.element, status);
                     this.updateSummary();
                     this.notifyObservers();
+                    this._log(`📋 Item ${itemNumber} atualizado para ${status}`);
                 }
             }
         });
@@ -185,6 +239,8 @@ class BaseFormManager {
                 }
             }
         });
+
+        this._log('✅ Eventos anexados');
     }
 
     /**
@@ -209,7 +265,7 @@ class BaseFormManager {
      * @returns {Object}
      */
     getData() {
-        return {
+        const data = {
             formType: this.formType,
             items: this.items.map(i => ({
                 number: i.number,
@@ -218,6 +274,13 @@ class BaseFormManager {
                 annotations: i.annotations || ''
             }))
         };
+
+        // Incluir fotos se existirem
+        if (this.photoManager && this.photoManager.hasPhotos()) {
+            data.fotos = this.photoManager.getPhotosData();
+        }
+
+        return data;
     }
 
     /**
@@ -226,6 +289,8 @@ class BaseFormManager {
      */
     loadData(data) {
         if (!data?.items) return;
+
+        this._log('📂 Carregando dados...');
 
         data.items.forEach(savedItem => {
             const item = this.items.find(i => i.number === savedItem.number);
@@ -251,12 +316,15 @@ class BaseFormManager {
         });
 
         this.updateSummary();
+        this._log('✅ Dados carregados com sucesso');
     }
 
     /**
      * Reseta o formulário
      */
     reset() {
+        this._log('🔄 Resetando formulário...');
+
         this.items.forEach(item => {
             item.status = null;
             item.annotations = '';
@@ -269,8 +337,35 @@ class BaseFormManager {
             item.element.classList.remove('is-ok', 'is-nok');
         });
 
+        // Limpar fotos
+        if (this.photoManager && typeof this.photoManager.clearPhotos === 'function') {
+            this.photoManager.clearPhotos();
+            this._log('🗑️ Fotos removidas');
+        }
+
         this.updateSummary();
         this.notifyObservers();
+        this._log('✅ Formulário resetado');
+    }
+
+    /**
+     * Configura o upload de fotos - deve ser sobrescrito
+     */
+    _setupPhotoUpload() {
+        // Deve ser sobrescrito pelas subclasses
+        this._log('⚠️ _setupPhotoUpload deve ser sobrescrito');
+    }
+
+    /**
+     * Método chamado pelo App para forçar a configuração das fotos
+     */
+    setupPhoto() {
+        if (this.photoManager && this.photoManager.initialized) {
+            this._log('✅ PhotoManager já inicializado');
+            return;
+        }
+        this._log('🔄 Forçando configuração de fotos...');
+        this._setupPhotoUpload();
     }
 
     /**
@@ -280,6 +375,7 @@ class BaseFormManager {
     addObserver(callback) {
         if (typeof callback === 'function') {
             this.observers.push(callback);
+            this._log('👀 Observer registrado');
         }
     }
 
@@ -292,20 +388,40 @@ class BaseFormManager {
             try {
                 cb(this.formType, data);
             } catch (error) {
-                console.error(`[${this.formType}] Erro em observer:`, error);
+                this._error('Erro em observer:', error);
             }
         });
     }
 
+    /**
+     * Destroi o formulário e libera recursos
+     */
+    destroy() {
+        this._log('🧹 Destruindo formulário...');
+        
+        // Limpar timers
+        this._photoSetupTimers.forEach(t => clearTimeout(t));
+        this._photoSetupTimers = [];
+        
+        // Destruir photo manager
+        if (this.photoManager && typeof this.photoManager.destroy === 'function') {
+            this.photoManager.destroy();
+        }
+        
+        this.observers = [];
+        this.items = [];
+        this.initialized = false;
+        
+        this._log('✅ Formulário destruído');
+    }
+
     /** @private */
     _updateCardVisual(element, status) {
-        // Atualizar classes visuais
         element.querySelectorAll('.status-option').forEach(opt => {
             const optStatus = opt.dataset.status;
             opt.classList.toggle('is-selected', optStatus === status);
         });
 
-        // Atualizar borda do card
         element.classList.remove('is-ok', 'is-nok');
         if (status === 'OK') element.classList.add('is-ok');
         if (status === 'NOK') element.classList.add('is-nok');

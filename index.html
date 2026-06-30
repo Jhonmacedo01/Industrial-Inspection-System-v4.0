@@ -31,29 +31,360 @@
     <!-- Estilos -->
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="css/components.css">
-    <link rel="stylesheet" href="css/components-photo.css">
+</head>
+<body>
+    <!-- ======================================================================
+    CONTAINER PRINCIPAL
+    ====================================================================== -->
+    <div class="app-shell">
 
-    <!-- ========== CONTEÚDO DA PÁGINA ========== -->
-    <!-- (todo o HTML do body permanece igual) -->
+        <!-- ===================================================================
+        HEADER CISCO THEME
+        =================================================================== -->
+        <header class="app-header">
+            <div class="header-row header-row--top">
+                <div class="brand-group">
+                    <div class="brand-logo">
+                        <i class="fas fa-microchip" aria-hidden="true"></i>
+                        <span class="brand-name">Inspection<span class="brand-accent">Form</span></span>
+                    </div>
+                    <div class="brand-badge" title="Sistema Multi-Formulário Industrial">
+                        <i class="fas fa-layer-group" aria-hidden="true"></i>
+                        <span>Switch Matrix Industrial</span>
+                    </div>
+                </div>
+                <div class="stats-group">
+                    <div class="stat-chip">
+                        <i class="fas fa-clipboard-list" aria-hidden="true"></i>
+                        <span>5 Sistemas</span>
+                    </div>
+                    <div class="stat-chip">
+                        <i class="fas fa-list-check" aria-hidden="true"></i>
+                        <span>65 Itens</span>
+                    </div>
+                    <div class="stat-chip stat-chip--autosave" id="autoSaveIndicator" title="AutoSave ativo a cada 30s">
+                        <i class="fas fa-cloud-arrow-up" aria-hidden="true"></i>
+                        <span>AutoSave</span>
+                    </div>
+                </div>
+            </div>
+            <div class="header-row header-row--bottom">
+                <span class="version-tag">v3.1.0 · Cisco Catalyst Theme</span>
+                <time class="live-clock" id="liveClock" datetime="" aria-live="polite"></time>
+            </div>
+        </header>
+
+        <!-- ===================================================================
+        CAMPOS DE IDENTIFICAÇÃO (GLOBAIS) - LOCAL, OM, TAG
+        =================================================================== -->
+        <div class="identification-panel" id="identificationPanel">
+            <div class="id-panel-header">
+                <i class="fas fa-tag"></i>
+                <span>Identificação da Inspeção</span>
+                <button type="button" class="id-panel-toggle" id="idPanelToggle" aria-label="Expandir/recolher identificação">
+                    <i class="fas fa-chevron-up"></i>
+                </button>
+            </div>
+            <div class="id-panel-body" id="idPanelBody">
+                <div class="id-fields-grid">
+                    <div class="id-field">
+                        <label for="globalLocal">
+                            <i class="fas fa-map-marker-alt"></i> LOCAL
+                        </label>
+                        <input 
+                            type="text" 
+                            id="globalLocal" 
+                            placeholder="Ex: MINE" 
+                            autocomplete="off"
+                            data-global-field="local"
+                        >
+                        <small class="field-hint">Ex: MINE, SUBSOLO, SALA 101</small>
+                    </div>
+                    <div class="id-field">
+                        <label for="globalOM">
+                            <i class="fas fa-clipboard-list"></i> OM
+                        </label>
+                        <input 
+                            type="text" 
+                            id="globalOM" 
+                            placeholder="Ex: 202602113806" 
+                            autocomplete="off"
+                            data-global-field="om"
+                        >
+                        <small class="field-hint">Ordem de Manutenção / Serviço</small>
+                    </div>
+                    <div class="id-field">
+                        <label for="globalTAG">
+                            <i class="fas fa-qrcode"></i> TAG
+                        </label>
+                        <input 
+                            type="text" 
+                            id="globalTAG" 
+                            placeholder="Ex: PB-6071KS-34" 
+                            autocomplete="off"
+                            data-global-field="tag"
+                        >
+                        <small class="field-hint">Identificação do equipamento</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===================================================================
+        BARRA DE PROGRESSO GLOBAL
+        =================================================================== -->
+        <div class="global-progress-wrapper" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Progresso total da inspeção">
+            <div class="global-progress-track">
+                <div class="global-progress-fill" id="globalProgressFill"></div>
+            </div>
+            <span class="global-progress-label" id="globalProgressLabel">0% preenchido</span>
+        </div>
+
+        <!-- ===================================================================
+        NAVEGAÇÃO PRINCIPAL (TABS) - 5 SISTEMAS
+        =================================================================== -->
+        <nav class="tab-navigation" role="tablist" aria-label="Formulários de inspeção">
+            <button
+                class="tab-button is-active"
+                id="tab-gnss"
+                data-tab="gnss"
+                role="tab"
+                aria-selected="true"
+                aria-controls="panel-gnss"
+                tabindex="0"
+            >
+                <i class="fas fa-satellite-dish" aria-hidden="true"></i>
+                <span class="tab-label">GNSS</span>
+                <span class="tab-badge" aria-label="Não conformidades GNSS">0</span>
+            </button>
+            <button
+                class="tab-button"
+                id="tab-cftv"
+                data-tab="cftv"
+                role="tab"
+                aria-selected="false"
+                aria-controls="panel-cftv"
+                tabindex="-1"
+            >
+                <i class="fas fa-video" aria-hidden="true"></i>
+                <span class="tab-label">CFTV</span>
+                <span class="tab-badge" aria-label="Não conformidades CFTV">0</span>
+            </button>
+            <button
+                class="tab-button"
+                id="tab-radio"
+                data-tab="radio"
+                role="tab"
+                aria-selected="false"
+                aria-controls="panel-radio"
+                tabindex="-1"
+            >
+                <i class="fas fa-broadcast-tower" aria-hidden="true"></i>
+                <span class="tab-label">Rádio</span>
+                <span class="tab-badge" aria-label="Não conformidades Rádio">0</span>
+            </button>
+            <button
+                class="tab-button"
+                id="tab-plc"
+                data-tab="plc"
+                role="tab"
+                aria-selected="false"
+                aria-controls="panel-plc"
+                tabindex="-1"
+            >
+                <i class="fas fa-microchip" aria-hidden="true"></i>
+                <span class="tab-label">PLC</span>
+                <span class="tab-badge" aria-label="Não conformidades PLC">0</span>
+            </button>
+            <button
+                class="tab-button"
+                id="tab-switch"
+                data-tab="switch"
+                role="tab"
+                aria-selected="false"
+                aria-controls="panel-switch"
+                tabindex="-1"
+            >
+                <i class="fas fa-server" aria-hidden="true"></i>
+                <span class="tab-label">SWITCH</span>
+                <span class="tab-badge" aria-label="Não conformidades SWITCH">0</span>
+            </button>
+        </nav>
+
+        <!-- ===================================================================
+        CONTEÚDO PRINCIPAL
+        =================================================================== -->
+        <main class="main-content">
+            <div class="tab-panel is-visible" id="panel-gnss" role="tabpanel" aria-labelledby="tab-gnss"></div>
+            <div class="tab-panel" id="panel-cftv" role="tabpanel" aria-labelledby="tab-cftv"></div>
+            <div class="tab-panel" id="panel-radio" role="tabpanel" aria-labelledby="tab-radio"></div>
+            <div class="tab-panel" id="panel-plc" role="tabpanel" aria-labelledby="tab-plc"></div>
+            <div class="tab-panel" id="panel-switch" role="tabpanel" aria-labelledby="tab-switch"></div>
+        </main>
+
+        <!-- ===================================================================
+        FOOTER
+        =================================================================== -->
+        <footer class="app-footer">
+            <div class="footer-left">
+                <i class="fas fa-shield-haltered" aria-hidden="true"></i>
+                <span>Inspeção Industrial · Conformidade ISO 9001</span>
+            </div>
+            <div class="footer-right">
+                <span class="status-dot status-dot--green" title="Sistema Operacional"></span>
+                <span>Operacional</span>
+                <span class="status-dot status-dot--blink" title="Processamento Ativo"></span>
+                <span>Ativo</span>
+            </div>
+        </footer>
+
+        <!-- ===================================================================
+        BOTÃO FLUTUANTE DE AÇÕES
+        =================================================================== -->
+        <div class="floating-actions" id="floatingActions">
+            <button class="fab fab--main" id="fabMain" aria-label="Abrir menu de ações" title="Menu de ações">
+                <i class="fas fa-bars-staggered" aria-hidden="true"></i>
+            </button>
+            <div class="fab-menu" id="fabMenu" role="menu" aria-label="Ações rápidas">
+                <button class="fab-item" data-action="export-full" role="menuitem" title="Exportar relatório completo (Ctrl+S)">
+                    <i class="fas fa-file-export"></i>
+                    <span>Relatório Completo</span>
+                </button>
+                <button class="fab-item" data-action="export-summary" role="menuitem" title="Exportar resumo de não conformidades">
+                    <i class="fas fa-chart-bar"></i>
+                    <span>Resumo NOK</span>
+                </button>
+                <button class="fab-item" data-action="export-json" role="menuitem" title="Exportar dados em JSON">
+                    <i class="fas fa-code"></i>
+                    <span>JSON</span>
+                </button>
+                <button class="fab-item" data-action="export-zip" role="menuitem" title="Exportar ZIP com fotos e relatório">
+                    <i class="fas fa-file-archive"></i>
+                    <span>Exportar ZIP</span>
+                </button>
+                <hr class="fab-divider" aria-hidden="true">
+                <button class="fab-item" data-action="export-gnss" role="menuitem" title="Exportar apenas formulário GNSS">
+                    <i class="fas fa-satellite-dish"></i>
+                    <span>Exportar GNSS</span>
+                </button>
+                <button class="fab-item" data-action="export-cftv" role="menuitem" title="Exportar apenas formulário CFTV">
+                    <i class="fas fa-video"></i>
+                    <span>Exportar CFTV</span>
+                </button>
+                <button class="fab-item" data-action="export-radio" role="menuitem" title="Exportar apenas formulário Rádio">
+                    <i class="fas fa-broadcast-tower"></i>
+                    <span>Exportar Rádio</span>
+                </button>
+                <button class="fab-item" data-action="export-plc" role="menuitem" title="Exportar apenas formulário PLC">
+                    <i class="fas fa-microchip"></i>
+                    <span>Exportar PLC</span>
+                </button>
+                <button class="fab-item" data-action="export-switch" role="menuitem" title="Exportar apenas formulário SWITCH">
+                    <i class="fas fa-server"></i>
+                    <span>Exportar SWITCH</span>
+                </button>
+                <hr class="fab-divider" aria-hidden="true">
+                <button class="fab-item" data-action="save-session" role="menuitem" title="Salvar progresso manualmente">
+                    <i class="fas fa-floppy-disk"></i>
+                    <span>Salvar Sessão</span>
+                </button>
+                <button class="fab-item" data-action="load-session" role="menuitem" title="Carregar última sessão salva">
+                    <i class="fas fa-folder-open"></i>
+                    <span>Carregar Sessão</span>
+                </button>
+                <hr class="fab-divider" aria-hidden="true">
+                <button class="fab-item fab-item--danger" data-action="reset-all" role="menuitem" title="Limpar todos os formulários (Ctrl+Shift+R)">
+                    <i class="fas fa-trash-arrow-up"></i>
+                    <span>Limpar Tudo</span>
+                </button>
+                <button class="fab-item" data-action="shortcuts-help" role="menuitem" title="Atalhos de teclado (Ctrl+H)">
+                    <i class="fas fa-keyboard"></i>
+                    <span>Atalhos</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ======================================================================
+    CONTAINER DE NOTIFICAÇÕES (TOASTS)
+    ====================================================================== -->
+    <div class="toast-stack" id="toastStack" aria-live="polite" aria-relevant="additions"></div>
+
+    <!-- ======================================================================
+    MODAL DE ATALHOS DE TECLADO
+    ====================================================================== -->
+    <div class="modal-overlay" id="shortcutsModal" aria-hidden="true">
+        <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modalTitle">
+                    <i class="fas fa-keyboard" aria-hidden="true"></i>
+                    Atalhos de Teclado
+                </h2>
+                <button class="modal-close" aria-label="Fechar modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <table class="shortcuts-table">
+                    <thead>
+                        <tr>
+                            <th>Atalho</th>
+                            <th>Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><kbd>Ctrl</kbd> + <kbd>S</kbd></td>
+                            <td>Exportar relatório completo</td>
+                        </tr>
+                        <tr>
+                            <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd></td>
+                            <td>Limpar todos os formulários</td>
+                        </tr>
+                        <tr>
+                            <td><kbd>1</kbd> a <kbd>5</kbd></td>
+                            <td>Alternar entre abas (GNSS, CFTV, Rádio, PLC, SWITCH)</td>
+                        </tr>
+                        <tr>
+                            <td><kbd>Ctrl</kbd> + <kbd>H</kbd></td>
+                            <td>Mostrar esta janela de atalhos</td>
+                        </tr>
+                        <tr>
+                            <td><kbd>Esc</kbd></td>
+                            <td>Fechar menus, modais e toasts</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn--primary modal-confirm">Entendido</button>
+            </div>
+        </div>
+    </div>
 
     <!-- ======================================================================
     SCRIPTS (Carregamento ordenado)
     ====================================================================== -->
+    <!-- Configuração -->
     <script src="js/config.js"></script>
+    
+    <!-- Utilitários -->
     <script src="js/modules/utils/validation.js"></script>
     <script src="js/modules/utils/auto-save.js"></script>
     <script src="js/modules/utils/export-manager.js"></script>
+    <script src="js/modules/utils/photo-capture.js"></script>
+    <script src="js/modules/utils/zip-export.js"></script>
+    
+    <!-- Formulários -->
     <script src="js/modules/forms/base-form.js"></script>
     <script src="js/modules/forms/gnss.js"></script>
     <script src="js/modules/forms/cftv.js"></script>
     <script src="js/modules/forms/radio.js"></script>
     <script src="js/modules/forms/plc.js"></script>
     <script src="js/modules/forms/switch.js"></script>
+    
+    <!-- Aplicação Principal -->
     <script src="js/app.js"></script>
 
-    <!-- NOVOS SCRIPTS PARA FOTOS E ZIP -->
+    <!-- JSZip para exportação ZIP -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="js/modules/utils/photo-capture.js"></script>
-    <script src="js/modules/utils/zip-export.js"></script>
 </body>
 </html>

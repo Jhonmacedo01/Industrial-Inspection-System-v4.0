@@ -6,59 +6,32 @@
 
 class ExportManager {
     constructor() {
-        /** Linha separadora */
         this.separator = '='.repeat(72);
         this.subSeparator = '-'.repeat(52);
-        
-        /** Dados de identificação LOCAL, OM, TAG */
-        this._identification = {
-            local: '',
-            om: '',
-            tag: ''
-        };
-        
+        this._identification = { local: '', om: '', tag: '' };
         this._loadIdentification();
     }
 
-    /**
-     * Carrega identificação do localStorage
-     */
     _loadIdentification() {
         try {
             const raw = localStorage.getItem('inspform_identification');
             if (raw) {
                 const data = JSON.parse(raw);
-                this._identification = {
-                    local: data.local || '',
-                    om: data.om || '',
-                    tag: data.tag || ''
-                };
+                this._identification = { local: data.local || '', om: data.om || '', tag: data.tag || '' };
             }
         } catch (e) {
             console.warn('Erro ao carregar identificação:', e);
         }
     }
 
-    /**
-     * Atualiza identificação
-     * @param {Object} identification - { local, om, tag }
-     */
     setIdentification(identification) {
         this._identification = { ...identification };
     }
 
-    /**
-     * Obtém identificação atual
-     * @returns {Object}
-     */
     getIdentification() {
         return { ...this._identification };
     }
 
-    /**
-     * Coleta dados de todos os formulários ativos
-     * @returns {Object} Dados consolidados
-     */
     collectAllData() {
         const managers = {
             gnss: window.gnssForm,
@@ -86,10 +59,6 @@ class ExportManager {
         return result;
     }
 
-    /**
-     * Gera cabeçalho de identificação para relatórios
-     * @returns {string[]}
-     */
     _generateIdentificationHeader() {
         const lines = [];
         const hasAny = this._identification.local || this._identification.om || this._identification.tag;
@@ -107,17 +76,12 @@ class ExportManager {
         return lines;
     }
 
-    /**
-     * Gera relatório completo
-     * @returns {string} Conteúdo do relatório
-     */
     generateFullReport() {
-        this._loadIdentification(); // Recarregar dados mais recentes
+        this._loadIdentification();
         const data = this.collectAllData();
         const now = new Date();
         const lines = [];
 
-        // Cabeçalho
         lines.push(this.separator);
         lines.push(`INSPECTION FORM v${CONFIG.VERSION} - RELATÓRIO DE INSPEÇÃO INDUSTRIAL`);
         lines.push(this.separator);
@@ -126,10 +90,8 @@ class ExportManager {
         lines.push(`🎨 Tema: ${CONFIG.THEME}`);
         lines.push('');
         
-        // Identificação LOCAL, OM, TAG
         lines.push(...this._generateIdentificationHeader());
         
-        // Seções
         const sections = [
             { key: 'gnss', name: 'GNSS - Sistema de Navegação Global por Satélite', icon: '🛰️' },
             { key: 'cftv', name: 'CFTV - Circuito Fechado de Televisão', icon: '📷' },
@@ -144,13 +106,11 @@ class ExportManager {
             lines.push(...this._generateSectionReport(name, data[key], key));
         });
 
-        // Resumo final com LOCAL, OM, TAG
         lines.push('');
         lines.push(this.separator);
         lines.push('📊 RESUMO FINAL DA INSPEÇÃO');
         lines.push(this.subSeparator);
         
-        // Incluir identificação no resumo
         if (this._identification.local || this._identification.om || this._identification.tag) {
             lines.push('📋 IDENTIFICAÇÃO:');
             if (this._identification.local) lines.push(`   LOCAL: ${this._identification.local}`);
@@ -188,7 +148,6 @@ class ExportManager {
             lines.push('🎉 NENHUMA NÃO CONFORMIDADE REGISTRADA');
         }
 
-        // Rodapé
         lines.push('');
         lines.push(this.separator);
         lines.push(`🏁 FIM DO RELATÓRIO - Gerado por ${CONFIG.SYSTEM_NAME} v${CONFIG.VERSION}`);
@@ -197,10 +156,6 @@ class ExportManager {
         return lines.join('\n');
     }
 
-    /**
-     * Gera relatório resumido (apenas não conformidades)
-     * @returns {string}
-     */
     generateSummaryReport() {
         this._loadIdentification();
         const data = this.collectAllData();
@@ -211,7 +166,6 @@ class ExportManager {
         lines.push(this.separator);
         lines.push('');
         
-        // Identificação LOCAL, OM, TAG
         lines.push(...this._generateIdentificationHeader());
 
         const sections = [
@@ -271,10 +225,6 @@ class ExportManager {
         return lines.join('\n');
     }
 
-    /**
-     * Gera seção do relatório para um formulário específico
-     * @private
-     */
     _generateSectionReport(sectionName, data, formKey) {
         const lines = [];
 
@@ -285,7 +235,6 @@ class ExportManager {
 
         lines.push(this.subSeparator);
 
-        // Itens regulares
         const regularItems = data.items.filter(i => !i.hasAlarms && !i.hasLeds && !i.hasOzd && !i.hasTemperature);
         const specialItems = data.items.filter(i => i.hasAlarms || i.hasLeds || i.hasOzd || i.hasTemperature);
         
@@ -303,7 +252,6 @@ class ExportManager {
             const statusIcon = item.status === 'OK' ? '✅' : '❌';
             lines.push(`  ${statusIcon} ITEM ${String(item.number).padStart(2, '0')}: ${item.title}`);
             
-            // Dados especiais - Rádio
             if (item.hasAlarms && data.alarms) {
                 const metrics = [];
                 if (data.alarms.ber) metrics.push(`BER: ${data.alarms.ber}`);
@@ -315,7 +263,6 @@ class ExportManager {
                 }
             }
             
-            // Dados especiais - PLC LEDs
             if (item.hasLeds && data.leds) {
                 const ledInfo = [];
                 if (data.leds.fontes) ledInfo.push(`Fontes: ${data.leds.fontes}`);
@@ -328,7 +275,6 @@ class ExportManager {
                 }
             }
             
-            // Dados especiais - Switch Temperatura
             if (item.hasTemperature && data.specialFields?.temperature) {
                 const temp = data.specialFields.temperature;
                 const tempStatus = parseFloat(temp) > 60 ? '⚠️ ALTA' : '✓ Normal';
@@ -343,10 +289,6 @@ class ExportManager {
         return lines;
     }
 
-    /**
-     * Exporta dados como JSON
-     * @returns {Object} Dados completos em JSON
-     */
     exportJSON() {
         this._loadIdentification();
         const data = this.collectAllData();
@@ -373,10 +315,6 @@ class ExportManager {
         return payload;
     }
 
-    /**
-     * Faz download de um relatório
-     * @param {'full'|'summary'} type - Tipo de relatório
-     */
     downloadReport(type = 'full') {
         this._loadIdentification();
         
@@ -397,9 +335,6 @@ class ExportManager {
         );
     }
 
-    /**
-     * Faz download dos dados em JSON
-     */
     downloadJSON() {
         this._loadIdentification();
         const payload = this.exportJSON();
@@ -409,10 +344,6 @@ class ExportManager {
         window.showToast?.('Dados JSON exportados!', 'success');
     }
 
-    /**
-     * Dispara o download de um arquivo
-     * @private
-     */
     _triggerDownload(content, filename, mimeType) {
         const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
         const url = URL.createObjectURL(blob);
@@ -427,7 +358,6 @@ class ExportManager {
     }
 }
 
-// Inicializar
 let exportManager = null;
 document.addEventListener('DOMContentLoaded', () => {
     exportManager = new ExportManager();

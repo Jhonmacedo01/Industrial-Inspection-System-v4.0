@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: industrial-inspection-system
+    runtime: static
+    buildCommand: echo "Static site - no build needed"
+    staticPublishPath: .
+    headers:
+      - path: /css/*.css
+        name: Content-Type
+        value: text/css
+      - path: /js/*.js
+        name: Content-Type
+        value: application/javascript
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

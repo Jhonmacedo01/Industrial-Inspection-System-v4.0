@@ -1,0 +1,556 @@
+/* ==========================================================================
+   INSPECTION FORM - COMPONENTES CISCO SWITCH
+   Componentes reutilizáveis e específicos
+   ========================================================================== */
+
+/* ==========================================================================
+   1. SWITCH PORTS (Visual Cisco)
+   ========================================================================== */
+
+.switch-ports {
+    background: #1a1a1a;
+    border-radius: var(--border-radius-lg);
+    padding: var(--space-md);
+    margin-bottom: var(--space-lg);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    position: relative;
+    overflow-x: auto;
+}
+
+.port {
+    background: #2d3436;
+    width: 40px;
+    height: 40px;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.port::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 20px;
+    height: 2px;
+    background: #00c853;
+    border-radius: 2px;
+}
+
+.port-number {
+    font-size: 0.7rem;
+    color: white;
+    font-family: monospace;
+}
+
+.port-status {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-top: 2px;
+}
+
+.port-status.active {
+    background: #00c853;
+    box-shadow: 0 0 5px #00c853;
+    animation: portBlink 2s infinite;
+}
+
+@keyframes portBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+/* ==========================================================================
+   2. CISCO BUTTONS
+   ========================================================================== */
+
+.btn-cisco {
+    background: linear-gradient(135deg, var(--cisco-blue), var(--cisco-dark-blue));
+    color: white;
+    border: none;
+    padding: var(--space-sm) var(--space-xl);
+    border-radius: var(--border-radius-md);
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.btn-cisco:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-cisco-outline {
+    background: transparent;
+    border: 2px solid var(--cisco-blue);
+    color: var(--cisco-blue);
+}
+
+.btn-cisco-outline:hover {
+    background: var(--cisco-blue);
+    color: white;
+}
+
+.btn-danger {
+    background: linear-gradient(135deg, #d32f2f, #f44336);
+}
+
+.btn-success {
+    background: linear-gradient(135deg, #00c853, #00a86b);
+}
+
+/* ==========================================================================
+   3. PROGRESS BAR
+   ========================================================================== */
+
+.progress-container {
+    background: #e2e8f0;
+    border-radius: 10px;
+    height: 8px;
+    overflow: hidden;
+    margin: var(--space-md) 0;
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--cisco-blue), var(--cisco-dark-blue));
+    border-radius: 10px;
+    transition: width var(--transition-base);
+    position: relative;
+    overflow: hidden;
+}
+
+.progress-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+    animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+/* ==========================================================================
+   4. TOOLTIPS
+   ========================================================================== */
+
+.tooltip {
+    position: relative;
+    cursor: help;
+}
+
+.tooltip::before {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--cisco-navy);
+    color: white;
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--border-radius-sm);
+    font-size: 0.75rem;
+    white-space: nowrap;
+    z-index: 1000;
+    opacity: 0;
+    pointer-events: none;
+    transition: var(--transition-fast);
+}
+
+.tooltip:hover::before {
+    opacity: 1;
+    transform: translateX(-50%) translateY(-5px);
+}
+
+/* ==========================================================================
+   5. MODAL (Cisco Style)
+   ========================================================================== */
+
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(5px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    opacity: 0;
+    visibility: hidden;
+    transition: var(--transition-base);
+}
+
+.modal-overlay.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.modal-container {
+    background: white;
+    border-radius: var(--border-radius-lg);
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    transform: scale(0.9);
+    transition: var(--transition-base);
+}
+
+.modal-overlay.active .modal-container {
+    transform: scale(1);
+}
+
+.modal-header {
+    background: var(--gradient-header);
+    padding: var(--space-md) var(--space-lg);
+    color: white;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-body {
+    padding: var(--space-lg);
+}
+
+.modal-footer {
+    padding: var(--space-md) var(--space-lg);
+    border-top: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+}
+
+.modal-close {
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 1.5rem;
+    cursor: pointer;
+}
+
+/* ==========================================================================
+   6. ACCORDION
+   ========================================================================== */
+
+.accordion-item {
+    border: 1px solid #e2e8f0;
+    border-radius: var(--border-radius-md);
+    margin-bottom: var(--space-md);
+    overflow: hidden;
+}
+
+.accordion-header {
+    background: #f8f9fa;
+    padding: var(--space-md);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    transition: var(--transition-fast);
+}
+
+.accordion-header:hover {
+    background: #e2e8f0;
+}
+
+.accordion-header i {
+    transition: var(--transition-fast);
+}
+
+.accordion-item.active .accordion-header i {
+    transform: rotate(180deg);
+}
+
+.accordion-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+    padding: 0 var(--space-md);
+}
+
+.accordion-item.active .accordion-content {
+    max-height: 500px;
+    padding: var(--space-md);
+}
+
+/* ==========================================================================
+   7. BADGES E INDICADORES
+   ========================================================================== */
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.badge-success {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.badge-danger {
+    background: #ffebee;
+    color: #c62828;
+}
+
+.badge-warning {
+    background: #fff3e0;
+    color: #ef6c00;
+}
+
+/* ==========================================================================
+   8. TABLES (Dados Técnicos)
+   ========================================================================== */
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: var(--space-md) 0;
+}
+
+.data-table th,
+.data-table td {
+    padding: var(--space-sm);
+    text-align: left;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.data-table th {
+    background: #f8f9fa;
+    font-weight: 600;
+    color: var(--cisco-navy);
+}
+
+.data-table tr:hover {
+    background: #f1f5f9;
+}
+
+/* ==========================================================================
+   9. CARDS DE RESUMO
+   ========================================================================== */
+
+.summary-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
+}
+
+.summary-card {
+    background: white;
+    border-radius: var(--border-radius-lg);
+    padding: var(--space-md);
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+    transition: var(--transition-fast);
+}
+
+.summary-card:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--shadow-lg);
+}
+
+.summary-card i {
+    font-size: 2rem;
+    color: var(--cisco-blue);
+    margin-bottom: var(--space-sm);
+}
+
+.summary-card .count {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--cisco-navy);
+}
+
+.summary-card .label {
+    font-size: 0.875rem;
+    color: var(--cisco-gray);
+}
+
+/* ==========================================================================
+   10. FORMULÁRIOS DE ALARMES (Rádio)
+   ========================================================================== */
+
+.alarm-panel {
+    background: linear-gradient(135deg, #1a1a2e, #16213e);
+    border-radius: var(--border-radius-lg);
+    padding: var(--space-md);
+    color: white;
+    margin-top: var(--space-md);
+}
+
+.alarm-panel h4 {
+    margin-bottom: var(--space-md);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.alarm-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--space-md);
+}
+
+.metric {
+    background: rgba(255,255,255,0.1);
+    padding: var(--space-sm);
+    border-radius: var(--border-radius-md);
+}
+
+.metric label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    opacity: 0.7;
+}
+
+.metric input {
+    background: rgba(0,0,0,0.3);
+    border: none;
+    color: white;
+    padding: var(--space-xs);
+    width: 100%;
+    border-radius: 4px;
+    font-family: monospace;
+}
+
+.metric input:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--cisco-blue);
+}
+
+/* ==========================================================================
+   11. STATUS DASHBOARD
+   ========================================================================== */
+
+.status-dashboard {
+    background: white;
+    border-radius: var(--border-radius-lg);
+    margin-bottom: var(--space-lg);
+    overflow: hidden;
+}
+
+.dashboard-header {
+    background: var(--cisco-navy);
+    color: white;
+    padding: var(--space-sm) var(--space-md);
+    font-weight: 600;
+}
+
+.dashboard-content {
+    padding: var(--space-md);
+}
+
+.status-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-sm) 0;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.status-item:last-child {
+    border-bottom: none;
+}
+
+/* ==========================================================================
+   12. RESPONSIVE COMPONENTES
+   ========================================================================== */
+
+@media (max-width: 768px) {
+    .switch-ports {
+        justify-content: center;
+    }
+    
+    .port {
+        width: 35px;
+        height: 35px;
+    }
+    
+    .summary-cards {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .modal-container {
+        width: 95%;
+    }
+}
+
+@media (max-width: 480px) {
+    .summary-cards {
+        grid-template-columns: 1fr;
+    }
+    
+    .alarm-metrics {
+        grid-template-columns: 1fr;
+    }
+    
+    .data-table {
+        font-size: 0.75rem;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: var(--space-xs);
+    }
+}
+
+/* ==========================================================================
+   13. PRINT STYLES
+   ========================================================================== */
+
+@media print {
+    .cisco-nav,
+    .floating-download-btn,
+    .toast-container,
+    .cisco-footer {
+        display: none;
+    }
+    
+    .inspection-card {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+    
+    .app-container {
+        padding: 0;
+        margin: 0;
+    }
+    
+    .cisco-header {
+        background: var(--cisco-navy);
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}
+
+/* ==========================================================================
+   FIM DOS COMPONENTES
+   ========================================================================== */

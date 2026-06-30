@@ -1,0 +1,183 @@
+================================================================================
+        INSPECTION FORM v3.1.0 - ESCOPO TÉCNICO-FUNCIONAL DETALHADO
+================================================================================
+
+SISTEMA: Inspection Form v3.1.0
+PLATAFORMA: Web (HTML5, CSS3, JavaScript ES6+)
+TEMA VISUAL: Cisco Catalyst Industrial
+LINK: https://inspection-form-fawn.vercel.app
+REPOSITÓRIO: https://github.com/Jhonmacedo01/Inspection_Industrial_Form_V3.1.0
+
+================================================================================
+1. VISÃO GERAL
+================================================================================
+
+O sistema substitui formulários físicos de inspeção industrial por uma plataforma
+digital centralizada, abrangendo 5 sistemas num total de 65 itens de inspeção.
+
+Recursos principais:
+- Autosalvamento (localStorage)
+- Validação em tempo real
+- Exportação de relatórios (TXT/JSON)
+- Zero dependências externas
+- Design responsivo e acessível (ARIA)
+
+================================================================================
+2. ESCOPO FUNCIONAL
+================================================================================
+
+2.1. Módulos de Inspeção por Sistema
+
+┌─────────────────┬────────┬────────────────────────────────────────────────┐
+│ Sistema         │ Itens  │ Principais aspectos verificados               │
+├─────────────────┼────────┼────────────────────────────────────────────────┤
+│ GNSS            │ 10     │ Estado do painel, fechadura, cabos,           │
+│                 │        │ dispositivos, LEDs, tubos, antenas, 5S        │
+├─────────────────┼────────┼────────────────────────────────────────────────┤
+│ CFTV            │ 9      │ Estado do painel, limpeza, vedação, cabos,    │
+│                 │        │ LEDs, tubos, câmeras, 5S                      │
+├─────────────────┼────────┼────────────────────────────────────────────────┤
+│ Rádio           │ 8+4    │ Condições física, cabos, fonte, LEDs, alarmes,│
+│ (Comunicação    │ métricas│ BER, RSSI, S/N, Throughput, 5S               │
+│ Digital)        │        │                                                │
+├─────────────────┼────────┼────────────────────────────────────────────────┤
+│ PLC             │ 23     │ Segurança, limpeza, TAGs, cabeamento, LEDs,   │
+│                 │        │ portas, OZDs (fibra), travas, fechadura,      │
+│                 │        │ temperatura, termografia, aterramento, 5S     │
+├─────────────────┼────────┼────────────────────────────────────────────────┤
+│ Switch          │ 15     │ Conservação, vedação, filtros, cabos, plugs,  │
+│ Industrial      │        │ TAGs, LEDs, temperatura (<=60°C), fixação,    │
+│                 │        │ ruídos, 5S                                    │
+└─────────────────┴────────┴────────────────────────────────────────────────┘
+
+2.2. Funcionalidades Transversais
+
+- Identificação da inspeção: campos para LOCAL, OM (Ordem de Manutenção) e TAG
+- Avaliação de cada item: status "Conforme" / "Não Conforme"
+- Contadores por sistema: Total / Conformes / Não Conformes
+- AutoSave (localStorage): recuperação automática dos dados
+- Validação em tempo real: obrigatoriedade dos campos de identificação
+- Atalhos de teclado: agilizam a navegação e marcação
+- Exportação de relatórios:
+  * TXT Completo - todos os resultados
+  * TXT Resumo NOK - apenas itens "Não Conforme"
+  * JSON - dados estruturados para integração
+- Design responsivo e acessível: ARIA labels, layout adaptável
+
+================================================================================
+3. ESCOPO TÉCNICO
+================================================================================
+
+3.1. Arquitetura e Tecnologias
+
+- Front-end puro: HTML5 semântico, CSS3 (Flexbox/Grid, Custom Properties)
+- JavaScript ES6+: Classes, Módulos, Observer Pattern
+- Persistência local: localStorage
+- Geração de arquivos: Blob + URL.createObjectURL
+
+3.2. Estrutura de Código
+
+/
+├── index.html                 # Página principal
+├── css/
+│   └── styles.css            # Tema Cisco Catalyst
+├── js/
+│   ├── config.js             # Configurações globais
+│   ├── app.js                # Orquestrador principal
+│   └── modules/
+│       ├── forms/
+│       │   ├── base-form.js  # Classe base abstrata
+│       │   ├── gnss.js
+│       │   ├── cftv.js
+│       │   ├── radio.js      # Inclui métricas
+│       │   └── plc.js        # Inclui LEDs e OZD
+│       └── utils/
+│           ├── validation.js
+│           ├── auto-save.js
+│           └── export-manager.js
+└── assets/
+    └── favicon.ico
+
+3.3. Tratamento de Dados Específicos
+
+- Rádio: métricas numéricas com faixas ideais (BER <0.001, RSSI >-70 dBm, S/N >20 dB)
+- PLC: LEDs de falha (fonte, comunicação, I/O, bateria) e canais OZD (CH2/CH3)
+- Switch: campo de temperatura com limite máximo de 60°C
+- Campos com método/padrão: texto auxiliar para orientação do inspetor
+
+3.4. Segurança e Performance
+
+- Zero dependências externas: sem CDNs ou frameworks
+- Acesso offline possível: funciona sem internet após primeira carga
+- Validação de entrada: tipagem e limites para campos numéricos
+
+================================================================================
+4. REGRAS DE NEGÓCIO
+================================================================================
+
+1. Obrigatoriedade: campos LOCAL, OM e TAG devem ser preenchidos para navegação
+
+2. Contagem automática: atualização em tempo real dos contadores por sistema
+
+3. Persistência: todos os dados salvos automaticamente no localStorage a cada
+   alteração
+
+4. Exportação: arquivos incluem metadados (data/hora, local, OM, TAG)
+
+5. Herança: todos os formulários herdam da classe base-form.js
+
+================================================================================
+5. CASOS DE USO PRINCIPAIS
+================================================================================
+
+┌─────────────────┬────────────────────────────┬──────────────────────────────┐
+│ Ator            │ Caso de Uso                 │ Fluxo Resumido               │
+├─────────────────┼────────────────────────────┼──────────────────────────────┤
+│ Inspetor        │ Realizar inspeção diária    │ Acessa URL, preenche dados,  │
+│ industrial      │                            │ marca itens, gera relatório  │
+├─────────────────┼────────────────────────────┼──────────────────────────────┤
+│ Supervisor      │ Analisar relatórios de      │ Recebe TXT Resumo NOK,       │
+│                 │ inconformidades             │ verifica itens não conformes │
+├─────────────────┼────────────────────────────┼──────────────────────────────┤
+│ Técnico de      │ Consultar histórico de      │ NECESSÁRIO BACKEND -         │
+│ manutenção      │ falhas                      │ não implementado             │
+├─────────────────┼────────────────────────────┼──────────────────────────────┤
+│ Administrador   │ Personalizar checklists     │ NÃO IMPLEMENTADO -           │
+│                 │                            │ checklists fixos em código   │
+└─────────────────┴────────────────────────────┴──────────────────────────────┘
+
+================================================================================
+6. NÃO ESCOPO (LIMITAÇÕES CONHECIDAS)
+================================================================================
+
+- Sem backend ou banco de dados: dados permanecem apenas no navegador
+- Sem autenticação ou controle de usuários
+- Sem histórico centralizado
+- Sem edição ou exclusão de itens da estrutura dos formulários
+- Sem assinatura digital ou upload de fotos
+- Sem integração com sistemas de manutenção (SAP, Maximo, etc.)
+
+================================================================================
+7. RECOMENDAÇÕES PARA EVOLUÇÃO (ROADMAP)
+================================================================================
+
+PRIORIDADE | FUNCIONALIDADE                     | JUSTIFICATIVA
+-----------|------------------------------------|------------------------------------------
+ALTA       | Integração com API REST            | Enviar dados para servidor central
+ALTA       | Autenticação (login)               | Controlar quem realiza inspeções
+MÉDIA      | Upload de fotos como evidência     | Documentar não conformidades
+MÉDIA      | Dashboard com gráficos OK/NOK      | Facilitar análise gerencial
+BAIXA      | Modo escuro / personalização       | Conforto visual
+BAIXA      | Aplicativo híbrido (offline avançado)| Disponibilizar em lojas de apps
+
+================================================================================
+8. CONCLUSÃO
+================================================================================
+
+O Inspection Form v3.1.0 é uma ferramenta funcional, bem estruturada e
+imediatamente utilizável para inspeções industriais de ativos de rede,
+automação e telecomunicações.
+
+Atende aos requisitos de digitalização de checklists, autossalvamento e
+geração de relatórios sem custo de infraestrutura. A arquitetura modular
+permite evoluções incrementais.

@@ -1,0 +1,12 @@
+☐ Testar todos os 5 formulários (GNSS, CFTV, Rádio, PLC, SWITCH)
+☐ Testar campos LOCAL, OM, TAG
+☐ Testar AutoSave (localStorage)
+☐ Testar exportação completa
+☐ Testar exportação resumo
+☐ Testar exportação individual (GNSS, CFTV, Rádio, PLC, SWITCH)
+☐ Testar exportação JSON
+☐ Testar reset global
+☐ Testar responsividade (mobile/tablet/desktop)
+☐ Testar atalhos de teclado (1-5, Ctrl+S, Ctrl+Shift+R, Ctrl+H)
+☐ Verificar console por erros
+☐ Testar em diferentes navegadores (Chrome, Firefox, Edge, Safari)

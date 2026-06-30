@@ -1,6 +1,6 @@
 /**
  * INSPECTION FORM v3.1.0
- * Módulo de Captura de Fotos - Versão Profissional com Captura Contínua
+ * Módulo de Captura de Fotos - Versão Profissional com Fallback Máximo
  * @module photo-capture
  */
 
@@ -18,21 +18,22 @@ class PhotoCaptureManager {
         this.debug = options.debug || false;
         this._isDestroyed = false;
         this._captureCount = 0;
+        this._cameraAttempts = 0;
+        this._maxCameraAttempts = 10;
         
-        // Configurações de qualidade - com fallback progressivo
-        this.quality = options.quality || 0.92;
-        this.preferredWidth = options.maxWidth || 1920;
-        this.preferredHeight = options.maxHeight || 1080;
-        this.minWidth = 640;
-        this.minHeight = 480;
+        // Configurações de qualidade - com fallback máximo
+        this.quality = options.quality || 0.90;
+        this.preferredWidth = options.maxWidth || 1280;
+        this.preferredHeight = options.maxHeight || 720;
+        this.minWidth = 320;
+        this.minHeight = 240;
         
-        // Resoluções para fallback progressivo
+        // Resoluções para fallback progressivo (mais compatíveis)
         this.resolutionLevels = [
-            { width: 3840, height: 2160, label: '4K' },
-            { width: 2560, height: 1440, label: '2.5K' },
             { width: 1920, height: 1080, label: 'Full HD' },
             { width: 1280, height: 720, label: 'HD' },
-            { width: 640, height: 480, label: 'VGA' }
+            { width: 640, height: 480, label: 'VGA' },
+            { width: 320, height: 240, label: 'QVGA' }
         ];
         this.currentResolutionIndex = 0;
         this._cameraCapabilities = null;
@@ -70,6 +71,7 @@ class PhotoCaptureManager {
         this.handleFiles = this.handleFiles.bind(this);
         this._tryCameraWithConstraints = this._tryCameraWithConstraints.bind(this);
         this._updateCaptureCount = this._updateCaptureCount.bind(this);
+        this._trySimpleCamera = this._trySimpleCamera.bind(this);
         
         this._log('🔧 PhotoCaptureManager instanciado - Modo Captura Contínua');
     }
@@ -414,7 +416,6 @@ class PhotoCaptureManager {
             return;
         }
         
-        // Se já estiver aberta, apenas focar
         if (this.isCameraOpen) {
             this._log('⚠️ Câmera já está aberta');
             return;
@@ -436,6 +437,7 @@ class PhotoCaptureManager {
 
         // Resetar contador e índice de resolução
         this._captureCount = 0;
+        this._cameraAttempts = 0;
         this.currentResolutionIndex = 0;
         
         // Tentar abrir câmera com resolução progressiva
@@ -443,19 +445,22 @@ class PhotoCaptureManager {
     }
 
     _tryCameraWithConstraints() {
+        this._cameraAttempts++;
+        
         // Verificar se ainda há resoluções para tentar
         if (this.currentResolutionIndex >= this.resolutionLevels.length) {
-            this._error('❌ Todas as resoluções falharam');
-            this.isCameraOpen = false;
-            window.showToast?.('❌ Não foi possível acessar a câmera. Use a galeria.', 'error', 4000);
-            this.openGallery();
+            this._error(`❌ Todas as ${this.resolutionLevels.length} resoluções falharam`);
+            
+            // Última tentativa: câmera simples sem constraints
+            this._log('🔄 Tentando câmera com configuração mínima...');
+            this._trySimpleCamera();
             return;
         }
 
         const level = this.resolutionLevels[this.currentResolutionIndex];
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
         
-        this._log(`📷 Tentando resolução ${level.label} (${level.width}x${level.height})`);
+        this._log(`📷 Tentando resolução ${level.label} (${level.width}x${level.height}) (tentativa ${this._cameraAttempts})`);
 
         // Tentar com facingMode 'environment' primeiro (mobile)
         const tryWithFacingMode = (facingMode) => {
@@ -470,9 +475,7 @@ class PhotoCaptureManager {
             return navigator.mediaDevices.getUserMedia(constraints);
         };
 
-        // Tentar com 'environment' primeiro (câmera traseira)
-        this._log('📷 Tentando com facingMode: environment');
-        
+        // Tentar com 'environment' (câmera traseira)
         tryWithFacingMode('environment')
             .then((stream) => {
                 this._handleCameraStream(stream, level);
@@ -481,7 +484,6 @@ class PhotoCaptureManager {
                 this._log(`⚠️ Falha com environment: ${err.message}`);
                 
                 // Tentar com 'user' (câmera frontal)
-                this._log('📷 Tentando com facingMode: user');
                 tryWithFacingMode('user')
                     .then((stream) => {
                         this._handleCameraStream(stream, level);
@@ -489,8 +491,7 @@ class PhotoCaptureManager {
                     .catch((err2) => {
                         this._log(`⚠️ Falha com user: ${err2.message}`);
                         
-                        // Tentar sem facingMode específico
-                        this._log('📷 Tentando sem facingMode específico');
+                        // Tentar sem facingMode
                         navigator.mediaDevices.getUserMedia({
                             video: {
                                 width: { ideal: level.width, min: this.minWidth },
@@ -506,11 +507,40 @@ class PhotoCaptureManager {
                             
                             // Tentar próxima resolução
                             this.currentResolutionIndex++;
-                            this._log(`🔄 Tentando próxima resolução...`);
                             this._tryCameraWithConstraints();
                         });
                     });
             });
+    }
+
+    _trySimpleCamera() {
+        this._log('📷 Tentando câmera com configuração mínima (sem constraints específicas)...');
+        
+        navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false
+        })
+        .then((stream) => {
+            this._log('✅ Câmera aberta com configuração mínima!');
+            const level = { label: 'Mínima', width: 0, height: 0 };
+            this._handleCameraStream(stream, level);
+        })
+        .catch((err) => {
+            this._error('❌ Todas as tentativas de abrir a câmera falharam', err);
+            this.isCameraOpen = false;
+            
+            let errorMsg = '❌ Não foi possível acessar a câmera.';
+            if (err.name === 'NotAllowedError') {
+                errorMsg = '📵 Permissão de câmera negada. Permita o acesso nas configurações do navegador.';
+            } else if (err.name === 'NotFoundError') {
+                errorMsg = '📷 Nenhuma câmera encontrada no dispositivo.';
+            } else if (err.name === 'NotReadableError') {
+                errorMsg = '⚠️ Câmera em uso por outro aplicativo.';
+            }
+            
+            window.showToast?.(errorMsg, 'error', 4000);
+            this.openGallery();
+        });
     }
 
     _handleCameraStream(stream, resolutionLevel) {
@@ -545,7 +575,6 @@ class PhotoCaptureManager {
         // Configurar botão de captura contínua
         const captureBtn = overlay.querySelector('#cameraCaptureBtn');
         if (captureBtn) {
-            // Remover event listeners antigos para evitar duplicação
             const newCaptureBtn = captureBtn.cloneNode(true);
             captureBtn.parentNode.replaceChild(newCaptureBtn, captureBtn);
             newCaptureBtn.addEventListener('click', () => {
@@ -565,7 +594,6 @@ class PhotoCaptureManager {
             });
         }
         
-        // Atualizar contador
         this._updateCaptureCount();
     }
 
@@ -588,7 +616,6 @@ class PhotoCaptureManager {
                 animation: cameraFadeIn 0.3s ease;
             `;
 
-            // Informações de cabeçalho
             const header = document.createElement('div');
             header.style.cssText = `
                 position: absolute;
@@ -606,12 +633,8 @@ class PhotoCaptureManager {
                 backdrop-filter: blur(10px);
             `;
             header.innerHTML = `
-                <span style="font-size:14px;font-weight:600;">
-                    📸 Captura Contínua
-                </span>
-                <span style="font-size:12px;opacity:0.7;">
-                    ${this.photos.length}/${this.maxPhotos} fotos
-                </span>
+                <span style="font-size:14px;font-weight:600;">📸 Captura Contínua</span>
+                <span style="font-size:12px;opacity:0.7;">${this.photos.length}/${this.maxPhotos} fotos</span>
             `;
             overlay.appendChild(header);
 
@@ -635,7 +658,6 @@ class PhotoCaptureManager {
             video.setAttribute('playsinline', '');
             videoWrapper.appendChild(video);
 
-            // Controle de flash animado
             const flash = document.createElement('div');
             flash.id = 'cameraFlash';
             flash.style.cssText = `
@@ -663,7 +685,6 @@ class PhotoCaptureManager {
                 justify-content: center;
             `;
 
-            // Contador de capturas na câmera
             const counterDisplay = document.createElement('span');
             counterDisplay.id = 'cameraCounter';
             counterDisplay.style.cssText = `
@@ -740,7 +761,6 @@ class PhotoCaptureManager {
             overlay.appendChild(videoWrapper);
             overlay.appendChild(controls);
 
-            // Informações de qualidade na parte inferior
             const qualityInfo = document.createElement('div');
             qualityInfo.style.cssText = `
                 color: rgba(255,255,255,0.4);
@@ -766,7 +786,6 @@ class PhotoCaptureManager {
             counter.textContent = `📷 ${this.photos.length} fotos`;
         }
         
-        // Atualizar badge na interface principal
         if (this.elements.countEl) {
             this.elements.countEl.textContent = `${this.photos.length}/${this.maxPhotos}`;
         }
@@ -796,8 +815,8 @@ class PhotoCaptureManager {
 
         try {
             const canvas = document.createElement('canvas');
-            const videoWidth = video.videoWidth || this.minWidth;
-            const videoHeight = video.videoHeight || this.minHeight;
+            const videoWidth = video.videoWidth || 640;
+            const videoHeight = video.videoHeight || 480;
             
             canvas.width = videoWidth;
             canvas.height = videoHeight;
@@ -810,7 +829,6 @@ class PhotoCaptureManager {
             
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            // Efeito de flash
             const flash = document.getElementById('cameraFlash');
             if (flash) {
                 flash.style.opacity = '0.8';
@@ -824,14 +842,9 @@ class PhotoCaptureManager {
                     const file = new File([blob], `foto_${Date.now()}.jpg`, { type: 'image/jpeg' });
                     this._log(`📸 Foto capturada: ${file.size} bytes`);
                     this.addFile(file);
-                    
-                    // Atualizar contador
                     this._updateCaptureCount();
-                    
-                    // Atualizar UI
                     this.updateUI();
                     this.notifyChange();
-                    
                     window.showToast?.('📸 Foto capturada!', 'success', 1000);
                 } else {
                     this._error('❌ Blob vazio na captura');

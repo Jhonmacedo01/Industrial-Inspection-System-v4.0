@@ -1,5 +1,5 @@
 /**
- * INSPECTION FORM v3.1.0
+ * INSPECTION FORM v4.0.0
  * Configurações Globais
  * 
  * @license MIT
@@ -9,13 +9,13 @@
 
 const CONFIG = Object.freeze({
     /** Versão do sistema */
-    VERSION: '3.1.0',
+    VERSION: '4.0.0',
 
     /** Nome do sistema */
     SYSTEM_NAME: 'Inspection Form',
 
     /** Tema visual */
-    THEME: 'Cisco Catalyst Industrial',
+    THEME: 'Cisco Catalyst Industrial v4',
 
     /** Informações de licenciamento */
     LICENSE: Object.freeze({
@@ -37,7 +37,8 @@ const CONFIG = Object.freeze({
         toastDuration: 4000,
         autoSaveDebounce: 2000,
         autoSaveInterval: 30000,
-        maxAnnotationLength: 500
+        maxAnnotationLength: 500,
+        maxPhotos: 40
     }),
 
     /** Status possíveis para itens de inspeção */

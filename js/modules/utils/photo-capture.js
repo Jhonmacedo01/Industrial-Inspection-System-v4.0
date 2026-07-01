@@ -1,6 +1,6 @@
 /**
  * INSPECTION FORM v4.0.0
- * Módulo de Captura de Fotos - Versão Profissional com Galeria Robusta
+ * Módulo de Captura de Fotos - VERSÃO DEFINITIVA COM GALERIA FUNCIONAL
  * @module photo-capture
  */
 
@@ -18,28 +18,9 @@ class PhotoCaptureManager {
         this.debug = options.debug || false;
         this._isDestroyed = false;
         this._captureCount = 0;
-        this._cameraAttempts = 0;
-        this._maxCameraAttempts = 10;
         
         // Configurações de qualidade
         this.quality = options.quality || 0.90;
-        this.preferredWidth = options.maxWidth || 1280;
-        this.preferredHeight = options.maxHeight || 720;
-        this.minWidth = 320;
-        this.minHeight = 240;
-        
-        // Resoluções para fallback progressivo
-        this.resolutionLevels = [
-            { width: 1920, height: 1080, label: 'Full HD' },
-            { width: 1280, height: 720, label: 'HD' },
-            { width: 640, height: 480, label: 'VGA' },
-            { width: 320, height: 240, label: 'QVGA' }
-        ];
-        this.currentResolutionIndex = 0;
-        this._cameraCapabilities = null;
-        this._currentStream = null;
-        this._currentOverlay = null;
-        this._currentVideo = null;
         
         // Elementos da UI
         this.elements = {
@@ -69,9 +50,6 @@ class PhotoCaptureManager {
         this.closeCamera = this.closeCamera.bind(this);
         this.addFile = this.addFile.bind(this);
         this.handleFiles = this.handleFiles.bind(this);
-        this._tryCameraWithConstraints = this._tryCameraWithConstraints.bind(this);
-        this._updateCaptureCount = this._updateCaptureCount.bind(this);
-        this._trySimpleCamera = this._trySimpleCamera.bind(this);
         
         this._log('🔧 PhotoCaptureManager instanciado');
     }
@@ -234,10 +212,10 @@ class PhotoCaptureManager {
                 progressLabel: document.getElementById(`${uniqueId}-progress-label`)
             };
 
-            // VALIDAÇÃO: Se o fileInput não for encontrado, criar um temporário
+            // GARANTIR QUE O FILE INPUT EXISTE
             if (!this.elements.fileInput) {
-                this._warn('⚠️ File input não encontrado, criando fallback...');
-                this._createFallbackFileInput(uniqueId);
+                this._warn('⚠️ File input não encontrado, criando...');
+                this._createFileInput(uniqueId);
             }
 
             this.updateUI();
@@ -247,7 +225,7 @@ class PhotoCaptureManager {
         }
     }
 
-    _createFallbackFileInput(uniqueId) {
+    _createFileInput(uniqueId) {
         try {
             const dropZone = document.getElementById(`${uniqueId}-dropzone`);
             if (dropZone) {
@@ -258,13 +236,11 @@ class PhotoCaptureManager {
                 fileInput.multiple = true;
                 fileInput.style.display = 'none';
                 dropZone.appendChild(fileInput);
-                
                 this.elements.fileInput = fileInput;
-                this.elements.fileInput.addEventListener('change', this.handleFileChange);
-                this._log('✅ File input de fallback criado');
+                this._log('✅ File input criado');
             }
         } catch (error) {
-            this._error('❌ Erro ao criar file input de fallback', error);
+            this._error('❌ Erro ao criar file input', error);
         }
     }
 
@@ -292,9 +268,15 @@ class PhotoCaptureManager {
                 this._log('✅ Eventos de drop zone anexados');
             }
 
-            // FILE INPUT
+            // FILE INPUT - GARANTIR QUE O EVENTO EXISTE
             if (fileInput) {
-                fileInput.addEventListener('change', this.handleFileChange);
+                // Remover listeners antigos para evitar duplicação
+                const newFileInput = fileInput.cloneNode(true);
+                if (fileInput.parentNode) {
+                    fileInput.parentNode.replaceChild(newFileInput, fileInput);
+                }
+                newFileInput.addEventListener('change', this.handleFileChange);
+                this.elements.fileInput = newFileInput;
                 this._log('✅ Evento de file input anexado');
             } else {
                 this._warn('⚠️ File input não encontrado');
@@ -302,23 +284,35 @@ class PhotoCaptureManager {
 
             // BOTÃO CÂMERA
             if (cameraBtn) {
-                cameraBtn.addEventListener('click', (e) => {
+                // Remover listeners antigos
+                const newCameraBtn = cameraBtn.cloneNode(true);
+                if (cameraBtn.parentNode) {
+                    cameraBtn.parentNode.replaceChild(newCameraBtn, cameraBtn);
+                }
+                newCameraBtn.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     this._log('📸 Botão câmera clicado');
                     this.openCamera();
                 });
+                this.elements.cameraBtn = newCameraBtn;
                 this._log('✅ Evento do botão câmera anexado');
             }
 
-            // BOTÃO GALERIA - CORRIGIDO
+            // BOTÃO GALERIA - CORREÇÃO PRINCIPAL
             if (galleryBtn) {
-                galleryBtn.addEventListener('click', (e) => {
+                // Remover listeners antigos
+                const newGalleryBtn = galleryBtn.cloneNode(true);
+                if (galleryBtn.parentNode) {
+                    galleryBtn.parentNode.replaceChild(newGalleryBtn, galleryBtn);
+                }
+                newGalleryBtn.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     this._log('🖼️ Botão galeria clicado');
                     this.openGallery();
                 });
+                this.elements.galleryBtn = newGalleryBtn;
                 this._log('✅ Evento do botão galeria anexado');
             } else {
                 this._warn('⚠️ Botão galeria não encontrado');
@@ -334,7 +328,6 @@ class PhotoCaptureManager {
                 this._log('✅ Evento do botão limpar anexado');
             }
 
-            // TECLADO
             document.addEventListener('keydown', this.handleKeyDown);
             this._log('✅ Eventos de teclado anexados');
         } catch (error) {
@@ -397,7 +390,7 @@ class PhotoCaptureManager {
     }
 
     /**
-     * ABRE A GALERIA - MÉTODO CORRIGIDO E ROBUSTO
+     * ABRE A GALERIA - MÉTODO CORRIGIDO
      */
     openGallery() {
         if (this._isDestroyed) {
@@ -412,17 +405,16 @@ class PhotoCaptureManager {
             return;
         }
         
-        // 1. Tenta usar o fileInput existente
+        // VERIFICAR SE O FILE INPUT EXISTE E ESTÁ NO DOM
         if (this.elements.fileInput) {
             try {
-                // Verificar se o fileInput está no DOM
+                // Verificar se o elemento está no DOM
                 if (document.contains(this.elements.fileInput)) {
                     this.elements.fileInput.click();
                     this._log('✅ Galeria aberta via file input');
                     return;
                 } else {
                     this._warn('⚠️ File input não está no DOM, recriando...');
-                    // Recriar file input
                     this._recreateFileInput();
                 }
             } catch (error) {
@@ -430,27 +422,24 @@ class PhotoCaptureManager {
             }
         }
         
-        // 2. Fallback: criar input temporário
+        // SE CHEGOU AQUI, FALLBACK
         this._log('🔄 Usando fallback para abrir galeria');
         this._createTemporaryFileInput();
     }
 
-    /**
-     * RECRIA O FILE INPUT - CORREÇÃO PARA QUANDO O ELEMENTO É PERDIDO
-     */
     _recreateFileInput() {
         try {
             const uniqueId = this.containerId.replace(/[^a-zA-Z0-9]/g, '_');
             const dropZone = document.getElementById(`${uniqueId}-dropzone`);
             
             if (dropZone) {
-                // Remover file input antigo se existir
+                // Remover file input antigo
                 const oldInput = document.getElementById(`${uniqueId}-fileinput`);
                 if (oldInput) {
                     oldInput.remove();
                 }
                 
-                // Criar novo file input
+                // Criar novo
                 const fileInput = document.createElement('input');
                 fileInput.type = 'file';
                 fileInput.id = `${uniqueId}-fileinput`;
@@ -461,7 +450,11 @@ class PhotoCaptureManager {
                 
                 fileInput.addEventListener('change', this.handleFileChange);
                 this.elements.fileInput = fileInput;
-                this._log('✅ File input recriado com sucesso');
+                this._log('✅ File input recriado');
+                
+                // Tentar abrir novamente
+                fileInput.click();
+                this._log('✅ Galeria aberta após recriação');
             }
         } catch (error) {
             this._error('❌ Erro ao recriar file input', error);
@@ -491,12 +484,12 @@ class PhotoCaptureManager {
             this._log('✅ File input temporário acionado');
         } catch (error) {
             this._error('❌ Erro ao criar file input temporário', error);
-            window.showToast?.('❌ Erro ao abrir galeria. Tente novamente.', 'error', 2000);
+            window.showToast?.('❌ Erro ao abrir galeria', 'error', 2000);
         }
     }
 
     // ==========================================================================
-    // MÉTODOS DA CÂMERA (PERMANECEM IGUAIS)
+    // MÉTODOS DA CÂMERA (SIMPLIFICADOS PARA ESTE FIX)
     // ==========================================================================
 
     openCamera() {
@@ -524,106 +517,51 @@ class PhotoCaptureManager {
             return;
         }
 
-        this._captureCount = 0;
-        this._cameraAttempts = 0;
-        this.currentResolutionIndex = 0;
-        this._tryCameraWithConstraints();
-    }
-
-    _tryCameraWithConstraints() {
-        this._cameraAttempts++;
-        
-        if (this.currentResolutionIndex >= this.resolutionLevels.length) {
-            this._error(`❌ Todas as ${this.resolutionLevels.length} resoluções falharam`);
-            this._log('🔄 Tentando câmera com configuração mínima...');
-            this._trySimpleCamera();
-            return;
-        }
-
-        const level = this.resolutionLevels[this.currentResolutionIndex];
-        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-        
-        this._log(`📷 Tentando resolução ${level.label} (${level.width}x${level.height})`);
-
-        const tryWithFacingMode = (facingMode) => {
-            const constraints = {
-                video: {
-                    width: { ideal: level.width, min: this.minWidth },
-                    height: { ideal: level.height, min: this.minHeight },
-                    facingMode: facingMode
-                },
-                audio: false
-            };
-            return navigator.mediaDevices.getUserMedia(constraints);
-        };
-
-        tryWithFacingMode('environment')
-            .then((stream) => {
-                this._handleCameraStream(stream, level);
-            })
-            .catch((err) => {
-                this._log(`⚠️ Falha com environment: ${err.message}`);
-                tryWithFacingMode('user')
-                    .then((stream) => {
-                        this._handleCameraStream(stream, level);
-                    })
-                    .catch((err2) => {
-                        this._log(`⚠️ Falha com user: ${err2.message}`);
-                        navigator.mediaDevices.getUserMedia({
-                            video: {
-                                width: { ideal: level.width, min: this.minWidth },
-                                height: { ideal: level.height, min: this.minHeight }
-                            },
-                            audio: false
-                        })
-                        .then((stream) => {
-                            this._handleCameraStream(stream, level);
-                        })
-                        .catch((err3) => {
-                            this._log(`⚠️ Falha sem facingMode: ${err3.message}`);
-                            this.currentResolutionIndex++;
-                            this._tryCameraWithConstraints();
-                        });
-                    });
-            });
-    }
-
-    _trySimpleCamera() {
-        this._log('📷 Tentando câmera com configuração mínima...');
-        
+        // Tentar abrir câmera com configuração simples
         navigator.mediaDevices.getUserMedia({
-            video: true,
+            video: { facingMode: 'environment' },
             audio: false
         })
         .then((stream) => {
-            this._log('✅ Câmera aberta com configuração mínima!');
-            const level = { label: 'Mínima', width: 0, height: 0 };
-            this._handleCameraStream(stream, level);
+            this._handleCameraStream(stream);
         })
         .catch((err) => {
-            this._error('❌ Todas as tentativas de abrir a câmera falharam', err);
+            this._error('❌ Erro ao acessar câmera', err);
             this.isCameraOpen = false;
             
-            let errorMsg = '❌ Não foi possível acessar a câmera.';
-            if (err.name === 'NotAllowedError') {
-                errorMsg = '📵 Permissão de câmera negada. Permita o acesso nas configurações do navegador.';
-            } else if (err.name === 'NotFoundError') {
-                errorMsg = '📷 Nenhuma câmera encontrada no dispositivo.';
-            } else if (err.name === 'NotReadableError') {
-                errorMsg = '⚠️ Câmera em uso por outro aplicativo.';
-            }
-            
-            window.showToast?.(errorMsg, 'error', 4000);
-            this.openGallery();
+            // Tentar com facingMode 'user'
+            navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'user' },
+                audio: false
+            })
+            .then((stream) => {
+                this._handleCameraStream(stream);
+            })
+            .catch((err2) => {
+                this._error('❌ Erro ao acessar câmera com user', err2);
+                // Tentar sem facingMode
+                navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: false
+                })
+                .then((stream) => {
+                    this._handleCameraStream(stream);
+                })
+                .catch((err3) => {
+                    this._error('❌ Todas as tentativas de abrir a câmera falharam', err3);
+                    window.showToast?.('❌ Não foi possível acessar a câmera. Use a galeria.', 'error', 4000);
+                    this.openGallery();
+                });
+            });
         });
     }
 
-    _handleCameraStream(stream, resolutionLevel) {
-        this._log(`✅ Câmera aberta com resolução ${resolutionLevel.label}`);
+    _handleCameraStream(stream) {
+        this._log('✅ Câmera aberta com sucesso');
         this.isCameraOpen = true;
         this._currentStream = stream;
         
-        const overlay = this._createCameraOverlay(resolutionLevel);
+        const overlay = this._createSimpleCameraOverlay();
         
         if (!overlay) {
             this._error('❌ Falha ao criar overlay da câmera');
@@ -669,7 +607,7 @@ class PhotoCaptureManager {
         this._updateCaptureCount();
     }
 
-    _createCameraOverlay(resolutionLevel) {
+    _createSimpleCameraOverlay() {
         try {
             const overlay = document.createElement('div');
             overlay.id = 'cameraOverlay';
@@ -685,7 +623,6 @@ class PhotoCaptureManager {
                 flex-direction: column;
                 align-items: center;
                 justify-content: center;
-                animation: cameraFadeIn 0.3s ease;
             `;
 
             const header = document.createElement('div');
@@ -790,16 +727,8 @@ class PhotoCaptureManager {
                 align-items: center;
                 gap: 10px;
                 font-family: 'Inter', sans-serif;
-                transition: transform 0.2s, box-shadow 0.2s;
+                transition: transform 0.2s;
             `;
-            captureBtn.addEventListener('mouseenter', () => {
-                captureBtn.style.transform = 'scale(1.05)';
-                captureBtn.style.boxShadow = '0 6px 30px rgba(239,68,68,0.6)';
-            });
-            captureBtn.addEventListener('mouseleave', () => {
-                captureBtn.style.transform = 'scale(1)';
-                captureBtn.style.boxShadow = '0 4px 20px rgba(239,68,68,0.4)';
-            });
 
             const closeBtn = document.createElement('button');
             closeBtn.id = 'cameraCloseBtn';
@@ -818,32 +747,13 @@ class PhotoCaptureManager {
                 gap: 10px;
                 font-family: 'Inter', sans-serif;
                 backdrop-filter: blur(10px);
-                transition: background 0.2s;
             `;
-            closeBtn.addEventListener('mouseenter', () => {
-                closeBtn.style.background = 'rgba(255,255,255,0.25)';
-            });
-            closeBtn.addEventListener('mouseleave', () => {
-                closeBtn.style.background = 'rgba(255,255,255,0.15)';
-            });
 
             controls.appendChild(captureBtn);
             controls.appendChild(closeBtn);
 
             overlay.appendChild(videoWrapper);
             overlay.appendChild(controls);
-
-            const qualityInfo = document.createElement('div');
-            qualityInfo.style.cssText = `
-                color: rgba(255,255,255,0.4);
-                font-size: 12px;
-                text-align: center;
-                font-family: 'Inter', sans-serif;
-                margin-top: 4px;
-                margin-bottom: 10px;
-            `;
-            qualityInfo.textContent = `📷 ${resolutionLevel.label} · Qualidade ${Math.round(this.quality * 100)}% · Clique em Capturar para fotos contínuas`;
-            overlay.appendChild(qualityInfo);
 
             return overlay;
         } catch (error) {
